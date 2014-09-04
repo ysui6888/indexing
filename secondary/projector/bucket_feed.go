@@ -208,7 +208,7 @@ func (bfeed *BucketFeed) GetStatistics() map[string]interface{} {
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{bfCmdGetStatistics, respch}
 	resp, _ := c.FailsafeOp(bfeed.reqch, respch, cmd, bfeed.finch)
-	return resp[1].(map[string]interface{})
+	return resp[0].(map[string]interface{})
 }
 
 // CloseFeed synchronous call.
@@ -296,6 +296,7 @@ func (bfeed *BucketFeed) requestFeed(
 	bfeed.updateEngines(endpoints, engines)
 	
 	for _, kvfeed := range bfeed.kvfeeds {
+		// have to call requestFeed instead of RequestFeed here since kvfeed gen-server may not have been started 
 		err := kvfeed.requestFeed(req)
 		if err != nil {
 			return err
@@ -327,7 +328,8 @@ func (bfeed *BucketFeed) doClose() (err error) {
 	// proceed to close the kvfeed
 	for _, kvfeed := range bfeed.kvfeeds {
 		kvfeed.Stop()
-		// close all downstream VbucketRoutines after closing KVFeed
+		// moved the stopping of downstream VbucketRoutines from KVFeed to here since VbucketRoutines do not 
+		// need to stopped each time KVFeed is.
 		for _, vr := range kvfeed.Connector().DownStreams(){
 			vr.(*VbucketRoutine).Stop()
 		}
@@ -336,6 +338,7 @@ func (bfeed *BucketFeed) doClose() (err error) {
 	// close the gen-server
 	close(bfeed.finch)
 	bfeed.kvfeeds = nil
+	bfeed.kvfeedStatsCollectors = nil
 	c.Infof("%v ... stopped\n", bfeed.logPrefix)
 	return
 }

@@ -161,7 +161,7 @@ func (feed *Feed) GetStatistics() map[string]interface{} {
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{fCmdGetStatistics, respch}
 	resp, _ := c.FailsafeOp(feed.reqch, respch, cmd, feed.finch)
-	return resp[1].(map[string]interface{})
+	return resp[0].(map[string]interface{})
 }
 
 // CloseFeed will shutdown this feed and upstream and downstream instances,
