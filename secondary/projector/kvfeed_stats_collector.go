@@ -20,7 +20,7 @@ func (kvsc *KVFeedStatisticsCollector) OnEvent (eventType pc.PartEventType, item
 	kvsc.countLock.Lock()
 	defer kvsc.countLock.Unlock()
 	
-	c.Infof("KVFeedStatisticsCollector OnEvent called on collector %v for eventType %v \n", kvsc, eventType)
+	c.Debugf("KVFeedStatisticsCollector OnEvent called on collector %v for eventType %v \n", kvsc, eventType)
 	if _, ok := part.(*KVFeed); ok {
 		switch (eventType) {
 			case pc.DataProcessed:
