@@ -68,6 +68,7 @@ import (
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/couchbaselabs/go-couchbase"
+	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 )
 
 // error codes
@@ -136,7 +137,6 @@ type Projector struct {
 	cluster   string                       // cluster address to connect
 	kvaddrs   []string                     // immutable set of kv-nodes to connect with
 	adminport string                       // <host:port> for projector's admin-port
-	topics    map[string]*Feed             // active topics, mutable dictionary
 	buckets   map[string]*couchbase.Bucket // bucket instances
 	// gen-server
 	reqch chan []interface{}
@@ -153,11 +153,12 @@ func NewProjector(cluster string, kvaddrs []string, adminport string) *Projector
 		cluster:   cluster,
 		kvaddrs:   kvaddrs,
 		adminport: adminport,
-		topics:    make(map[string]*Feed),
 		buckets:   make(map[string]*couchbase.Bucket),
 		reqch:     make(chan []interface{}),
 		finch:     make(chan bool),
 	}
+	// set the pipelineFactory in pipelineManager to FeedFactory
+	pm.PipelineManager(&feed_factory);
 	p.logPrefix = fmt.Sprintf("[%v]", p.repr())
 	go mainAdminPort(adminport, p)
 	go p.genServer(p.reqch)
@@ -186,7 +187,7 @@ func (p *Projector) getKVNodes() []string {
 // gen-server commands
 const (
 	pCmdGetFeed byte = iota + 1
-	pCmdAddFeed
+	pCmdNewFeed
 	pCmdDelFeed
 	pCmdListTopics
 	pCmdGetStatistics
@@ -204,12 +205,15 @@ func (p *Projector) GetFeed(topic string) (*Feed, error) {
 	return resp[0].(*Feed), nil
 }
 
-// AddFeed save `feed` for `topic` for this projector.
-func (p *Projector) AddFeed(topic string, feed *Feed) error {
+// NewFeed creates feed instance for `topic`.
+func (p *Projector) NewFeed(topic string, request *protobuf.MutationStreamRequest) (*Feed, error) {
 	respch := make(chan []interface{}, 1)
-	cmd := []interface{}{pCmdAddFeed, topic, feed, respch}
+	cmd := []interface{}{pCmdNewFeed, topic, request, respch}
 	resp, err := c.FailsafeOp(p.reqch, respch, cmd, p.finch)
-	return c.OpError(err, resp, 0)
+	if err = c.OpError(err, resp, 1); err != nil {
+		return nil, err
+	}
+	return resp[0].(*Feed), nil
 }
 
 // DelFeed delete feed for `topic`.
@@ -263,9 +267,10 @@ loop:
 			feed, err := p.getFeed(msg[1].(string))
 			respch <- []interface{}{feed, err}
 
-		case pCmdAddFeed:
+		case pCmdNewFeed:
 			respch := msg[3].(chan []interface{})
-			respch <- []interface{}{p.addFeed(msg[1].(string), msg[2].(*Feed))}
+			feed, err := p.newFeed(msg[1].(string), msg[2].(*protobuf.MutationStreamRequest))
+			respch <- []interface{}{feed, err}
 
 		case pCmdDelFeed:
 			respch := msg[2].(chan []interface{})
@@ -279,51 +284,51 @@ loop:
 }
 
 func (p *Projector) listTopics() []string {
-	topics := make([]string, 0, len(p.topics))
-	for topic := range p.topics {
-		topics = append(topics, topic)
-	}
-	return topics
+	return pm.Topics()
 }
 
 func (p *Projector) getStatistics() c.Statistics {
 	feeds, _ := c.NewStatistics(p.stats.Get("feeds"))
-	for topic, feed := range p.topics {
-		feeds.Set(topic, feed.GetStatistics())
+	for topic, feed := range pm.Pipelines() {
+		feeds.Set(topic, feed.(*Feed).GetStatistics())
 	}
-	p.stats.Set("topics", p.topics)
+	p.stats.Set("topics", pm.Topics())
 	p.stats.Set("feeds", feeds)
 	return p.stats
 }
 
 func (p *Projector) getFeed(topic string) (*Feed, error) {
-	if feed, ok := p.topics[topic]; ok {
-		return feed, nil
+	if pipeline := pm.Pipeline(topic); pipeline != nil {
+		return pipeline.(*Feed), nil
 	}
 	return nil, ErrorTopicMissing
 }
 
-func (p *Projector) addFeed(topic string, feed *Feed) (err error) {
-	if _, ok := p.topics[topic]; ok {
-		return ErrorTopicExist
+func (p *Projector) newFeed(topic string, request *protobuf.MutationStreamRequest) (*Feed, error) {
+	if pipeline := pm.Pipeline(topic); pipeline != nil {
+		return nil, ErrorTopicExist
 	}
-	c.Infof("%v %q feed added ...", p.logPrefix, topic)
-	p.topics[topic] = feed
-	return
+	
+	if pipeline, err := pm.StartPipeline(topic, p.constructStartSettings(request)); err == nil {
+		c.Infof("%v %q feed added ...", p.logPrefix, topic)
+				return pipeline.(*Feed), nil
+	} else {
+			return nil, err
+	}
 }
 
 func (p *Projector) delFeed(topic string) (err error) {
-	if _, ok := p.topics[topic]; ok == false {
+	if pm.Pipeline(topic) == nil {
 		return ErrorTopicMissing
 	}
-	delete(p.topics, topic)
+	pm.StopPipeline(topic)
 	c.Infof("%v ... %q feed deleted", p.logPrefix, topic)
 	return
 }
 
 func (p *Projector) doClose() error {
-	for _, feed := range p.topics {
-		feed.CloseFeed()
+	for topic := range pm.Pipelines() {
+		pm.StopPipeline(topic)
 	}
 	for _, bucket := range p.buckets {
 		bucket.Close()
@@ -331,4 +336,17 @@ func (p *Projector) doClose() error {
 	close(p.finch)
 	c.Infof("%v ... stopped.\n", p.logPrefix)
 	return nil
+}
+
+// construct start settings for pipeline
+// start settings consists of a projector object and a RequestReader. The former is required by Feed and the latter is required by KVFeed
+func (p *Projector) constructStartSettings(request RequestReader) map[string]interface{} {
+		settings := make(map[string]interface{})
+		var setting [2]interface{}
+		setting[0] = p
+		setting[1] = request
+		// The "Key" key is never used and carries no significance
+		settings["Key"] = setting
+		
+	return settings
 }

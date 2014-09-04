@@ -35,26 +35,30 @@ package projector
 import (
 	"fmt"
 	c "github.com/couchbase/indexing/secondary/common"
-	"github.com/couchbase/indexing/secondary/protobuf"
+	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 )
 
 // BucketFeed is per bucket, multiple kv-node feeds, for a subset of vbuckets.
 type BucketFeed struct {
+	// Part
+	pp.AbstractPart  
 	// immutable fields
 	feed    *Feed
-	bucketn string
 	pooln   string
 	kvfeeds map[string]*KVFeed // kvaddr -> *KVFeed
+	kvfeedStatsCollectors map[string]*KVFeedStatisticsCollector  // kvaddr -> *KVFeedStatisticsCollector
 	// gen-server
 	reqch chan []interface{}
 	finch chan bool
 	// misc.
 	logPrefix string
 	stats     c.Statistics
+	// indicates whether the BucketFeed has been started
+	started  bool  
 }
 
-// NewBucketFeed creates a new instance of feed for specified bucket. Spawns a
-// routine for gen-server.
+// NewBucketFeed creates a new instance of feed for specified bucket. 
 //
 // if error, BucketFeed is not created.
 // - error returned by couchbase client, via NewKVFeed()
@@ -65,31 +69,54 @@ func NewBucketFeed(
 
 	bfeed = &BucketFeed{
 		feed:    feed,
-		bucketn: bucketn,
 		pooln:   pooln,
 		kvfeeds: make(map[string]*KVFeed),
+		kvfeedStatsCollectors: make(map[string]*KVFeedStatisticsCollector),
 		reqch:   make(chan []interface{}, c.GenserverChannelSize),
 		finch:   make(chan bool),
 	}
+	
+	// uses bucket name as the part Id  for BucketFeed
+	bfeed.AbstractPart = pp.NewAbstractPart(bucketn)
+	
 	bfeed.logPrefix = fmt.Sprintf("[%v]", bfeed.repr())
 	bfeed.stats = bfeed.newStats()
 
+	p := bfeed.getFeed().getProjector()
+	bucket, err := p.getBucket(pooln, bucketn)
+	if err != nil {
+		c.Errorf("%v getBucket(): %v\n", bfeed.logPrefix, err)
+		return nil, err
+	}
+	
 	// initialize KVFeeds
-	for _, kvaddr := range kvaddrs {
-		kvfeed, err := NewKVFeed(bfeed, kvaddr, pooln, bucketn)
+	for _, kvaddr := range kvaddrs {		
+		kvfeed, err := NewKVFeed(kvaddr, bfeed.repr(), bucket)
 		if err != nil {
 			bfeed.doClose()
 			return nil, err
 		}
+		// set the connector of KVFeed to KVFeedConnector to enable it to work with VbucketRoutines
+		connector, err := NewKVFeedConnector(bucketn, kvfeed.repr())
+		if err != nil {
+			bfeed.doClose()
+			return nil, err
+		}
+		kvfeed.SetConnector(connector)
+		
+		// register KVFeedStatisticsCollector as an event listener for KVFeed
+		kvfeedStatsCollector := new(KVFeedStatisticsCollector)
+		kvfeed.RegisterPartEventListener(pc.DataProcessed, kvfeedStatsCollector)
+		bfeed.kvfeedStatsCollectors[kvaddr] = kvfeedStatsCollector
+		
 		bfeed.kvfeeds[kvaddr] = kvfeed
 	}
-	go bfeed.genServer(bfeed.reqch)
-	c.Infof("%v started ...\n", bfeed.logPrefix)
+	c.Infof("%v bfeed created ...\n", bfeed.logPrefix)
 	return bfeed, nil
 }
 
 func (bfeed *BucketFeed) repr() string {
-	return fmt.Sprintf("%v:%v", bfeed.feed.repr(), bfeed.bucketn)
+	return fmt.Sprintf("%v:%v", bfeed.feed.repr(), bfeed.Id())
 }
 
 func (bfeed *BucketFeed) getFeed() *Feed {
@@ -114,20 +141,16 @@ const (
 func (bfeed *BucketFeed) RequestFeed(
 	request RequestReader,
 	endpoints map[string]*Endpoint,
-	engines map[uint64]*Engine) (*protobuf.TsVbuuid, *protobuf.TsVbuuid, error) {
+	engines map[uint64]*Engine) error {
 
 	if request == nil || engines == nil || len(engines) == 0 {
-		return nil, nil, ErrorArgument
+		return ErrorArgument
 	}
 
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{bfCmdRequestFeed, request, endpoints, engines, respch}
 	resp, err := c.FailsafeOp(bfeed.reqch, respch, cmd, bfeed.finch)
-	if err = c.OpError(err, resp, 2); err != nil {
-		return nil, nil, err
-	}
-	failoverTs, kvTs := resp[0].(*protobuf.TsVbuuid), resp[1].(*protobuf.TsVbuuid)
-	return failoverTs, kvTs, nil
+	return c.OpError(err, resp, 0)
 }
 
 // UpdateFeed synchronous call.
@@ -139,20 +162,16 @@ func (bfeed *BucketFeed) RequestFeed(
 func (bfeed *BucketFeed) UpdateFeed(
 	request RequestReader,
 	endpoints map[string]*Endpoint,
-	engines map[uint64]*Engine) (failoverTs, kvTs *protobuf.TsVbuuid, err error) {
+	engines map[uint64]*Engine) error {
 
 	if request == nil || engines == nil || len(engines) == 0 {
-		return nil, nil, ErrorArgument
+		return ErrorArgument
 	}
 
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{bfCmdRequestFeed, request, endpoints, engines, respch}
 	resp, err := c.FailsafeOp(bfeed.reqch, respch, cmd, bfeed.finch)
-	if err = c.OpError(err, resp, 2); err != nil {
-		return nil, nil, err
-	}
-	failoverTs, kvTs = resp[0].(*protobuf.TsVbuuid), resp[1].(*protobuf.TsVbuuid)
-	return failoverTs, kvTs, nil
+	return c.OpError(err, resp, 0)
 }
 
 // UpdateEngines synchronous call.
@@ -220,32 +239,39 @@ loop:
 			endpoints := msg[2].(map[string]*Endpoint)
 			engines := msg[3].(map[uint64]*Engine)
 			respch := msg[4].(chan []interface{})
-			failTs, kvTs, err := bfeed.requestFeed(req, endpoints, engines)
-			respch <- []interface{}{failTs, kvTs, err}
+			err := bfeed.requestFeed(req, endpoints, engines)
+			respch <- []interface{}{err}
 
 		case bfCmdUpdateEngines:
 			endpoints := msg[1].(map[string]*Endpoint)
 			engines := msg[2].(map[uint64]*Engine)
 			respch := msg[3].(chan []interface{})
-			for _, kvfeed := range bfeed.kvfeeds {
-				kvfeed.UpdateEngines(endpoints, engines)
-			}
+			bfeed.updateEngines(endpoints, engines)
 			respch <- []interface{}{nil}
 
 		case bfCmdDeleteEngines:
 			endpoints := msg[1].(map[string]*Endpoint)
 			engines := msg[2].([]uint64)
 			respch := msg[3].(chan []interface{})
+			// call DeleteEngines on all downstream KVFeedConnectors
 			for _, kvfeed := range bfeed.kvfeeds {
-				kvfeed.DeleteEngines(endpoints, engines)
+				kvfeed.Connector().(*KVFeedConnector).DeleteEngines(endpoints, engines)	
 			}
 			respch <- []interface{}{nil}
 
 		case bfCmdGetStatistics:
 			respch := msg[1].(chan []interface{})
 			kvfeeds, _ := c.NewStatistics(bfeed.stats.Get("kvfeeds"))
-			for kvaddr, kvfeed := range bfeed.kvfeeds {
-				kvfeeds.Set(kvaddr, kvfeed.GetStatistics())
+				for kvaddr, kvfeed := range bfeed.kvfeeds {
+				kvfeedStats := make(map[string]interface{})
+				// add statistics from KVFeed
+				kvfeedStats["events"] = bfeed.kvfeedStatsCollectors[kvaddr].Statistics()
+				for partId, part := range kvfeed.Connector().DownStreams() {
+					// add statistics from downstream VBucketRountines
+					s := fmt.Sprintf("%v", partId)
+					kvfeedStats[s] = part.(*VbucketRoutine).GetStatistics()
+				}
+				kvfeeds.Set(kvaddr, kvfeedStats)
 			}
 			bfeed.stats.Set("kvfeeds", kvfeeds)
 			respch <- []interface{}{bfeed.stats.ToMap()}
@@ -263,24 +289,31 @@ loop:
 func (bfeed *BucketFeed) requestFeed(
 	req RequestReader,
 	endpoints map[string]*Endpoint,
-	engines map[uint64]*Engine) (failTs, kvTs *protobuf.TsVbuuid, err error) {
-
-	var fTs, vTs *protobuf.TsVbuuid
-
-	failTs = protobuf.NewTsVbuuid(bfeed.bucketn, c.MaxVbuckets)
-	kvTs = protobuf.NewTsVbuuid(bfeed.bucketn, c.MaxVbuckets)
+	engines map[uint64]*Engine) error {
 
 	c.Debugf("%v updating feed ...", bfeed.logPrefix)
 
+	bfeed.updateEngines(endpoints, engines)
+	
 	for _, kvfeed := range bfeed.kvfeeds {
-		fTs, vTs, err = kvfeed.RequestFeed(req, endpoints, engines)
+		err := kvfeed.requestFeed(req)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
-		failTs = failTs.Union(fTs)
-		kvTs = kvTs.Union(vTs)
 	}
-	return failTs, kvTs, nil
+
+	return nil
+}
+
+// update Engines in downstream nodes
+func(bfeed *BucketFeed) updateEngines(
+	endpoints map[string]*Endpoint,
+	engines map[uint64]*Engine){
+		
+		// call UpdateEngines on all downstream KVFeedConnectors
+		for _, kvfeed := range bfeed.kvfeeds {
+			kvfeed.Connector().(*KVFeedConnector).UpdateEngines(endpoints, engines)	
+		}
 }
 
 // execute close
@@ -291,13 +324,58 @@ func (bfeed *BucketFeed) doClose() (err error) {
 		}
 	}()
 
-	// proceed closing the upstream
+	// proceed to close the kvfeed
 	for _, kvfeed := range bfeed.kvfeeds {
-		kvfeed.CloseFeed()
+		kvfeed.Stop()
+		// close all downstream VbucketRoutines after closing KVFeed
+		for _, vr := range kvfeed.Connector().DownStreams(){
+			vr.(*VbucketRoutine).Stop()
+		}
 	}
+	
 	// close the gen-server
 	close(bfeed.finch)
 	bfeed.kvfeeds = nil
 	c.Infof("%v ... stopped\n", bfeed.logPrefix)
 	return
+}
+
+// implements Part
+func (bfeed *BucketFeed) Start(settings map[string]interface{}) error {
+	go bfeed.genServer(bfeed.reqch)
+	c.Infof("%v started ...\n", bfeed.logPrefix)
+	
+	bfeed.started = true
+	return nil
+}
+
+func (bfeed *BucketFeed) Stop() error {
+	err := bfeed.CloseFeed() 
+	if err == nil {
+		bfeed.started = false
+	} 
+	return err
+}
+
+func (bfeed *BucketFeed) Receive (data interface{}) error {
+	// BucketFeed is a source nozzle and does not receive from upstream nodes
+	return nil
+}
+
+func (bfeed *BucketFeed) IsStarted() bool {
+	return bfeed.started
+}
+
+// implements Nozzle
+// These methods are not actively used and are not implemented.
+func (bfeed *BucketFeed) Open() error {
+	return nil
+}
+
+func (bfeed *BucketFeed) Close() error {
+	return nil
+}
+
+func (bfeed *BucketFeed) IsOpen() bool {
+	return false
 }

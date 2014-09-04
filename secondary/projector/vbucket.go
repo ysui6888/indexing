@@ -20,11 +20,16 @@ import (
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
 	"time"
+	"errors"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 )
+
+var ErrorInvalidDataForVbucketRoutine = errors.New("secondary.invalidDataForVbucketRoutine")
+var ErrorInvalidConnectorForVbucketRoutine = errors.New("secondary.invalidConnectorForVbucketRoutine")
 
 // VbucketRoutine is immutable structure defined for each vbucket.
 type VbucketRoutine struct {
-	kvfeed *KVFeed // immutable
+	pp.AbstractPart  // Part
 	bucket string  // immutable
 	vbno   uint16  // immutable
 	vbuuid uint64  // immutable
@@ -32,14 +37,16 @@ type VbucketRoutine struct {
 	reqch chan []interface{}
 	finch chan bool
 	// misc.
+	kvfeedRepr string
 	logPrefix string
-	stats     c.Statistics
+	stats c.Statistics
+	started bool
 }
 
 // NewVbucketRoutine creates a new routine to handle this vbucket stream.
-func NewVbucketRoutine(kvfeed *KVFeed, bucket string, vbno uint16, vbuuid uint64) *VbucketRoutine {
+func NewVbucketRoutine(kvfeedRepr, bucket string, vbno uint16, vbuuid uint64) *VbucketRoutine {
 	vr := &VbucketRoutine{
-		kvfeed: kvfeed,
+		kvfeedRepr: kvfeedRepr,
 		bucket: bucket,
 		vbno:   vbno,
 		vbuuid: vbuuid,
@@ -48,14 +55,16 @@ func NewVbucketRoutine(kvfeed *KVFeed, bucket string, vbno uint16, vbuuid uint64
 	}
 	vr.logPrefix = fmt.Sprintf("[%v]", vr.repr())
 	vr.stats = vr.newStats()
-
-	go vr.run(vr.reqch, nil, nil)
-	c.Infof("%v ... started\n", vr.logPrefix)
+	
+	// uses vbno as the part Id  for VbucketRoutine
+	vr.AbstractPart = pp.NewAbstractPart(convertUintToString(vbno))
+	
+	c.Infof("%v ... created\n", vr.logPrefix)
 	return vr
 }
 
 func (vr *VbucketRoutine) repr() string {
-	return fmt.Sprintf("vb %v:%v", vr.kvfeed.repr(), vr.vbno)
+	return fmt.Sprintf("vb %v:%v", vr.kvfeedRepr, vr.vbno)
 }
 
 const (
@@ -111,9 +120,11 @@ func (vr *VbucketRoutine) Close() error {
 
 // routine handles data path for a single vbucket, never panics.
 // TODO: statistics on data path must be fast.
-func (vr *VbucketRoutine) run(reqch chan []interface{}, endpoints map[string]*Endpoint, engines map[uint64]*Engine) {
+func (vr *VbucketRoutine) run(reqch chan []interface{}) {
 	var seqno uint64
 	var heartBeat <-chan time.Time
+	
+	var engines map[uint64]*Engine
 
 	stats := vr.stats
 	uEngineCount := stats.Get("uEngines").(float64)
@@ -132,7 +143,8 @@ loop:
 			switch cmd {
 			case vrCmdUpdateEngines:
 				if msg[1] != nil {
-					endpoints = msg[1].(map[string]*Endpoint)
+					// update down stream node map in connector
+					vr.Connector().(*VbucketRoutineConnector).SetDownStreams(msg[1].(map[string]*Endpoint))
 				}
 				if msg[2] != nil {
 					engines = msg[2].(map[uint64]*Engine)
@@ -146,14 +158,15 @@ loop:
 				)
 
 			case vrCmdDeleteEngines:
-				endpoints = msg[1].(map[string]*Endpoint)
+				// update down stream node map in connector
+				vr.Connector().(*VbucketRoutineConnector).SetDownStreams(msg[1].(map[string]*Endpoint))
 				for _, uuid := range msg[2].([]uint64) {
 					delete(engines, uuid)
 				}
 				respch := msg[3].(chan []interface{})
 				respch <- []interface{}{nil}
 				dEngineCount++
-				vr.debugCtrlPath(endpoints, engines)
+				vr.debugCtrlPath(msg[1].(map[string]*Endpoint), engines)
 
 			case vrCmdGetStatistics:
 				respch := msg[1].(chan []interface{})
@@ -170,7 +183,7 @@ loop:
 				// broadcast StreamBegin
 				switch m.Opcode {
 				case mc.UprStreamRequest:
-					vr.sendToEndpoints(endpoints, func(raddr string) *c.KeyVersions {
+					vr.sendToEndpoints(func(raddr string) *c.KeyVersions {
 						kv := c.NewKeyVersions(0, m.Key, 1)
 						kv.AddStreamBegin()
 						return kv
@@ -183,7 +196,7 @@ loop:
 				case mc.UprSnapshot:
 					c.Debugf("%v received snapshot %v %v (type %v)\n",
 						vr.logPrefix, m.SnapstartSeq, m.SnapendSeq, m.SnapshotType)
-					vr.sendToEndpoints(endpoints, func(raddr string) *c.KeyVersions {
+					vr.sendToEndpoints(func(raddr string) *c.KeyVersions {
 						kv := c.NewKeyVersions(0, m.Key, 1)
 						kv.AddSnapshot(m.SnapshotType, m.SnapstartSeq, m.SnapendSeq)
 						return kv
@@ -198,7 +211,7 @@ loop:
 
 				// prepare a KeyVersions for each endpoint.
 				kvForEndpoints := make(map[string]*c.KeyVersions)
-				for raddr := range endpoints {
+				for raddr := range vr.Connector().DownStreams() {
 					kv := c.NewKeyVersions(seqno, m.Key, len(engines))
 					kvForEndpoints[raddr] = kv
 				}
@@ -207,25 +220,19 @@ loop:
 					engine.AddToEndpoints(m, kvForEndpoints)
 				}
 				// send kv to corresponding endpoint
-				for raddr, kv := range kvForEndpoints {
-					if kv.Length() == 0 {
-						continue
-					}
-					// send might fail, we don't care
-					endpoints[raddr].Send(vr.bucket, vr.vbno, vr.vbuuid, kv)
-				}
+				vr.sendKVMapToEndpoints(kvForEndpoints)
 				mutationCount++
 
 			case vrCmdClose:
 				respch := msg[1].(chan []interface{})
-				vr.doClose(seqno, endpoints)
+				vr.doClose(seqno)
 				respch <- []interface{}{nil}
 				break loop
 			}
 
 		case <-heartBeat:
-			if endpoints != nil {
-				vr.sendToEndpoints(endpoints, func(raddr string) *c.KeyVersions {
+			if len(vr.Connector().DownStreams()) > 0 {
+				vr.sendToEndpoints(func(raddr string) *c.KeyVersions {
 					c.Tracef("%v sync %v to %q", vr.logPrefix, syncCount, raddr)
 					kv := c.NewKeyVersions(seqno, nil, 1)
 					kv.AddSync()
@@ -238,8 +245,8 @@ loop:
 }
 
 // close this vbucket routine
-func (vr *VbucketRoutine) doClose(seqno uint64, endpoints map[string]*Endpoint) {
-	vr.sendToEndpoints(endpoints, func(raddr string) *c.KeyVersions {
+func (vr *VbucketRoutine) doClose(seqno uint64) {
+	vr.sendToEndpoints(func(raddr string) *c.KeyVersions {
 		kv := c.NewKeyVersions(seqno, nil, 1)
 		kv.AddStreamEnd()
 		return kv
@@ -248,15 +255,18 @@ func (vr *VbucketRoutine) doClose(seqno uint64, endpoints map[string]*Endpoint) 
 	c.Infof("%v ... stopped\n", vr.logPrefix)
 }
 
-// send to all endpoints
-func (vr *VbucketRoutine) sendToEndpoints(
-	endpoints map[string]*Endpoint, fn func(string) *c.KeyVersions) {
-
-	for raddr, endpoint := range endpoints {
+func (vr *VbucketRoutine) sendToEndpoints(fn func(string) *c.KeyVersions) error {
+    kvForEndPoints := make(map[string]*c.KeyVersions)
+	for raddr := range vr.Connector().DownStreams() {
 		kv := fn(raddr)
-		// send might fail, we don't care
-		endpoint.Send(vr.bucket, vr.vbno, vr.vbuuid, kv)
+		kvForEndPoints[raddr] = kv
 	}
+	return vr.sendKVMapToEndpoints(kvForEndPoints)
+}
+
+// send KeyVersions map to endpoints. Each endpoint may get different KeyVersions
+func (vr *VbucketRoutine) sendKVMapToEndpoints(kvForEndPoints map[string]*c.KeyVersions) error {
+	return vr.Connector().Forward(NewVbucketRoutineConnectorData(vr.bucket, vr.vbno, vr.vbuuid, kvForEndPoints))
 }
 
 func (vr *VbucketRoutine) debugCtrlPath(endpoints map[string]*Endpoint, engines map[uint64]*Engine) {
@@ -270,4 +280,32 @@ func (vr *VbucketRoutine) debugCtrlPath(endpoints map[string]*Endpoint, engines 
 			c.Debugf("%v, knows engine %v\n", vr.logPrefix, uuid)
 		}
 	}
+}
+
+// implements Part
+func (vr *VbucketRoutine) Start(settings map[string]interface{}) error {
+	go vr.run(vr.reqch)
+	c.Infof("%v ... started\n", vr.logPrefix)
+	vr.started = true
+	return nil
+}
+func (vr *VbucketRoutine) Stop() error {
+	err := vr.Close()
+	if err == nil {
+		vr.started = false
+	}
+	return err
+}
+
+// this is the only method used and implemented
+func (vr *VbucketRoutine) Receive (data interface{}) error {
+	if m, ok := data.(*mc.UprEvent); !ok {
+		return ErrorInvalidDataForVbucketRoutine
+	} else {
+		return vr.Event(m) 
+	}
+}
+
+func (vr *VbucketRoutine) IsStarted() bool {
+	return vr.started
 }

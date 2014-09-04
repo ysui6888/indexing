@@ -188,13 +188,7 @@ func (p *Projector) doMutationFeed(request *protobuf.MutationStreamRequest) ap.M
 		return response
 	}
 
-	feed, err = NewFeed(p, topic, request) // fresh feed
-	if err != nil {
-		response.UpdateErr(err)
-		return response
-	}
-
-	if err = feed.RequestFeed(request); err == nil {
+	if feed, err = p.NewFeed(topic, request); err == nil {
 		// we expect failoverTimestamps and kvTimestamps to be populated.
 		failTss := make([]*protobuf.TsVbuuid, 0, len(bucketns))
 		kvTss := make([]*protobuf.TsVbuuid, 0, len(bucketns))
@@ -204,10 +198,11 @@ func (p *Projector) doMutationFeed(request *protobuf.MutationStreamRequest) ap.M
 		}
 		response.UpdateTimestamps(failTss, kvTss)
 	} else {
-		feed.CloseFeed() // on error close the feed
+		if feed != nil {
+			feed.Stop() // on error stop the feed
+		}
 		response.UpdateErr(err)
 	}
-	p.AddFeed(topic, feed)
 	return response
 }
 
@@ -295,9 +290,9 @@ func (p *Projector) doShutdownFeed(request *protobuf.ShutdownStreamRequest) ap.M
 	c.Debugf("%v doShutdownFeed()\n", p.logPrefix)
 	topic := request.GetTopic()
 
-	feed, err := p.GetFeed(topic)
+	_, err := p.GetFeed(topic)
 	if err == nil { // only existing feed
-		feed.CloseFeed()
+	    // this will stop the feed
 		p.DelFeed(topic)
 	} else {
 		c.Errorf("%v %v\n", p.logPrefix, err)

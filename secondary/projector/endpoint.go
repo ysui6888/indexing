@@ -27,14 +27,18 @@ package projector
 import (
 	"fmt"
 	"time"
-
+	"errors"
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/dataport"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 )
+
+var ErrorInvalidDataForEndpoint = errors.New("secondary.invalidDataForEndpoint")
 
 // Endpoint structure to gather key-versions / mutations from one or more
 // vbuckets and push them downstream to a specific node.
 type Endpoint struct {
+	pp.AbstractPart  // Part
 	feed   *Feed
 	raddr  string           // immutable
 	client *dataport.Client // immutable
@@ -47,6 +51,7 @@ type Endpoint struct {
 	timestamp int64
 	logPrefix string
 	stats     c.Statistics
+	started bool
 }
 
 // NewEndpoint instanstiat a new Endpoint routine and return its reference.
@@ -68,10 +73,12 @@ func NewEndpoint(feed *Feed, raddr string, n int, coord bool) (*Endpoint, error)
 	}
 	endpoint.logPrefix = fmt.Sprintf("[%v]", endpoint.repr())
 	endpoint.stats = endpoint.newStats()
+	
+	// uses raddr as the part Id  for Endpoint
+	endpoint.AbstractPart = pp.NewAbstractPart(raddr)
+	c.Infof("%v constructed (with %v conns) for feed %v ...\n",
+		endpoint.logPrefix, n, feed.Topic())
 
-	go endpoint.run(endpoint.kvch, endpoint.reqch)
-	c.Infof("%v started (with %v conns) for feed %v ...\n",
-		endpoint.logPrefix, n, feed.topic)
 	return endpoint, nil
 }
 
@@ -82,6 +89,24 @@ func (endpoint *Endpoint) repr() string {
 
 func (endpoint *Endpoint) isCoord() bool {
 	return endpoint.coord
+}
+
+// data type that Endpoint accepts
+type EndpointData struct {
+	bucket string  
+	vbno   uint16 
+	vbuuid uint64
+	kv *c.KeyVersions  
+}
+
+func NewEndpointData(bucket string, vbno uint16, vbuuid uint64, kv *c.KeyVersions) (*EndpointData) {
+	endpData := &EndpointData{
+		bucket : bucket,
+		vbno : vbno,
+		vbuuid : vbuuid,
+		kv : kv,
+	}
+	return endpData
 }
 
 // commands
@@ -134,7 +159,7 @@ func (endpoint *Endpoint) Send(bucket string, vbno uint16, vbuuid uint64, kv *c.
 }
 
 // Close this endpoint.
-func (endpoint *Endpoint) Close() error {
+func (endpoint *Endpoint) CloseEndpoint() error {
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{endpCmdClose, respch}
 	resp, err := c.FailsafeOp(endpoint.reqch, respch, cmd, endpoint.finch)
@@ -246,4 +271,48 @@ func (endpoint *Endpoint) doClose() {
 	endpoint.client.Close()
 	close(endpoint.finch)
 	c.Infof("%v ... stopped\n", endpoint.logPrefix)
+}
+
+// implements Part
+func(endpoint *Endpoint) Start(settings map[string]interface{}) error {
+	go endpoint.run(endpoint.kvch, endpoint.reqch)
+	c.Infof("%v started for feed %v ...\n",
+		endpoint.logPrefix, endpoint.feed.Topic())
+	endpoint.started = true
+	return nil
+}
+
+func(endpoint *Endpoint) Stop() error {
+	err := endpoint.CloseEndpoint()
+	if err == nil {
+		endpoint.started = false
+	}
+	return nil
+}
+
+func (endpoint *Endpoint) Receive (data interface{}) error {
+	// onlyEndpointData type data is accepted
+	endpointData, ok := data.(*EndpointData)
+	if !ok {
+		return ErrorInvalidDataForEndpoint
+	}
+
+	return endpoint.Send(endpointData.bucket, endpointData.vbno, endpointData.vbuuid, endpointData.kv)
+}
+
+func (endpoint *Endpoint) IsStarted() bool {
+	return endpoint.started
+}
+
+// implements Nozzle
+func(endpoint *Endpoint) Open() error {
+	return nil
+}
+
+func (endpoint *Endpoint) Close() error {
+	return nil
+}
+
+func(endpoint *Endpoint) IsOpen() bool {
+	return false
 }
