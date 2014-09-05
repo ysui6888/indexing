@@ -44,6 +44,7 @@ func NewVbucketRoutineConnectorData(bucket string, vbno uint16, vbuuid uint64, k
 	return vrd
 }
 
+// implements Connector
 func(vrc *VbucketRoutineConnector) Forward(data interface{}) error{
 	// only VbucketRoutineConnectorData type data is accepted
 	vrcData, ok := data.(*VbucketRoutineConnectorData)
@@ -80,6 +81,7 @@ func(vrc *VbucketRoutineConnector) AddDownStream (partId string, part pc.Part) e
 	return nil
 }
 
+// convenience API
 func(vrc *VbucketRoutineConnector) SetDownStreams (endpoints map[string]*Endpoint) {
 	vrc.endpoints = endpoints
 }

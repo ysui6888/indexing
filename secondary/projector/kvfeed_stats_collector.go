@@ -21,21 +21,17 @@ func (kvsc *KVFeedStatisticsCollector) OnEvent (eventType pc.PartEventType, item
 	defer kvsc.countLock.Unlock()
 	
 	c.Debugf("KVFeedStatisticsCollector OnEvent called on collector %v for eventType %v \n", kvsc, eventType)
-	if _, ok := part.(*KVFeed); ok {
-		switch (eventType) {
-			case pc.DataProcessed:
-				kvsc.eventCount ++;
-			default:
-		}
+	switch (eventType) {
+		case pc.DataProcessed:
+			kvsc.eventCount ++;
+		default:
 	}
-	
-	// Question: do we throw error when part is not KVFeed? it should not happen with the way OnEvent is called
-			
 }
 
 func (kvsc *KVFeedStatisticsCollector) Statistics() uint64 {
 	kvsc.countLock.Lock()
 	defer kvsc.countLock.Unlock()
+	
 	return kvsc.eventCount
 }
 

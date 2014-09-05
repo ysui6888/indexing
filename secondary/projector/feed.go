@@ -9,7 +9,7 @@ import (
 
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
 )
 
 // error codes
@@ -30,7 +30,7 @@ var ErrorInvalidStartingSettingsForFeed = errors.New("secondary.invalidStartingS
 type Feed struct {
 	projector *Projector // immutable
 	// embed GenericPipeline to support generic pipeline functionalities
-	*pc.GenericPipeline
+	*pp.GenericPipeline
 	engines   map[uint64]*Engine
 	// timestamp feedback
 	failoverTimestamps map[string]*protobuf.TsVbuuid // indexed by bucket name

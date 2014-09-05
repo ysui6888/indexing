@@ -11,7 +11,6 @@ import (
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 )
 
-// TODO generalize and move to other places
 var ErrorInvalidDataForKVFeedConnector = errors.New("secondary.invalidDataForKVFeedConnector")
 var ErrorInvalidDownStreamNodeForKVFeedConnector = errors.New("secondary.invalidDownStreamNodeForKVFeedConnector")
 
@@ -38,7 +37,7 @@ func NewKVFeedConnector(bucketn, kvfeedRepr string) (*KVFeedConnector, error) {
 }
 
 func (kvc *KVFeedConnector) repr() string {
-	// should we append "Connector" to the end?
+	// use the same repr as KVFeed. should we append "Connector" to the end to distinguish?
 	return fmt.Sprintf("%v", kvc.kvfeedRepr)
 }
 
@@ -162,7 +161,7 @@ func(kvc *KVFeedConnector) AddDownStream (partId string, part pc.Part) error{
 	return nil	
 }
 
-// utility functions doing uint to string conversions for vbno, which is uint16 and needs to be converted to string to be used as Part Id
+// utility functions for uint to string conversions for vbno, which is uint16 and needs to be converted to string to be used as Part Id
 func convertUintToString (vbno uint16) string {
 	return strconv.FormatUint(uint64(vbno), 10)
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/indexing/secondary/protobuf"
 	c "github.com/couchbase/indexing/secondary/common"
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
 	pctx "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_ctx"
 )
 
@@ -16,7 +17,7 @@ type feedFactory struct {
 var feed_factory feedFactory
 
 func(feedFactory *feedFactory) NewPipeline (topic string) (pc.Pipeline, error) {
-	genericPipeline := pc.NewGenericPipeline(topic, make(map[string]pc.Nozzle), make(map[string]pc.Nozzle))
+	genericPipeline := pp.NewGenericPipeline(topic, make(map[string]pc.Nozzle), make(map[string]pc.Nozzle))
 	if pipelineContext, err := pctx.New(genericPipeline); err != nil {
 		return nil, err
 	} else {
