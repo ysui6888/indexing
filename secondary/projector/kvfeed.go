@@ -202,7 +202,7 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 	// filter vbuckets for this kvfeed.
 	ts = ts.SelectByVbuckets(vbnos)
 	
-	settings := constructStartSettingsForKVFeed(ts)
+	settings := ConstructStartSettingsForKVFeed(ts)
 
 	c.Debugf("start: %v restart: %v shutdown: %v\n",
 		req.IsStart(), req.IsRestart(), req.IsShutdown())
@@ -281,7 +281,7 @@ loop:
 }
 
 // construct start settings for KVFeed, which contains a single restart timestamp
-func constructStartSettingsForKVFeed(ts *protobuf.TsVbuuid) map[string]interface{} {
+func ConstructStartSettingsForKVFeed(ts *protobuf.TsVbuuid) map[string]interface{} {
 		settings := make(map[string]interface{})
 		// The "Key" key is never used and carries no significance
 		settings["Key"] = ts
