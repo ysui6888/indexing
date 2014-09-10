@@ -71,6 +71,7 @@ type KVFeed struct {
 	// Part
 	pp.AbstractPart 
 	// immutable fields
+	kvaddr  string
 	bucket  BucketAccess
 	feeder  KVFeeder
 	// gen-server
@@ -91,15 +92,24 @@ type KVFeed struct {
 //
 // if error, KVFeed is not started
 // - error returned by couchbase client
-func NewKVFeed(kvaddr, parentRepr string, bucket *couchbase.Bucket) (*KVFeed, error) {
+func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket) (*KVFeed, error) {
 	kvfeed := &KVFeed{
+		kvaddr: kvaddr,
 		bucket: bucket,
 		parentRepr: parentRepr,
 	}
 	
 	// uses kvaddr as the part Id  for KVFeed
 	var isStarted_callback_func pp.IsStarted_Callback_Func = kvfeed.IsStarted
-	kvfeed.AbstractPart = pp.NewAbstractPart(kvaddr, &isStarted_callback_func)
+	var kvfeedId string
+	if len(partId) > 0 {
+		kvfeedId = partId
+	} else {
+		// default the id of kvfeed to kvaddr if not specified
+		kvfeedId = kvaddr
+	}
+	
+	kvfeed.AbstractPart = pp.NewAbstractPart(kvfeedId, &isStarted_callback_func)
 	
 	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
 	
@@ -190,12 +200,12 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 		c.Errorf("%v bucket.Refresh() %v \n", prefix, err)
 	}
 
-	m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.Id()})
+	m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.kvaddr})
 	if err != nil {
 		c.Errorf("%v bucket.GetVBmap() %v \n", prefix, err)
 		return err
 	}
-	vbnos := m[kvfeed.Id()]
+	vbnos := m[kvfeed.kvaddr]
 	if vbnos == nil {
 		return ErrorVBmap
 	}
@@ -311,7 +321,7 @@ func parseStartSettingsForKVFeed(settings map[string]interface{}) (*protobuf.TsV
 // start KVFeed by starting VB stream on feeder
 func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 	// initializes feeder in KVFeed
-	feeder, err := OpenKVFeed(kvfeed.bucket.(*couchbase.Bucket), kvfeed.Id(), kvfeed)
+	feeder, err := OpenKVFeed(kvfeed.bucket.(*couchbase.Bucket), kvfeed.kvaddr, kvfeed)
 	if err != nil {
 		c.Errorf("%v OpenKVFeed(): %v\n", kvfeed.logPrefix, err)
 		return err
