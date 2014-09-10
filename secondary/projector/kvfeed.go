@@ -98,7 +98,8 @@ func NewKVFeed(kvaddr, parentRepr string, bucket *couchbase.Bucket) (*KVFeed, er
 	}
 	
 	// uses kvaddr as the part Id  for KVFeed
-	kvfeed.AbstractPart = pp.NewAbstractPart(kvaddr)
+	var isStarted_callback_func pp.IsStarted_Callback_Func = kvfeed.IsStarted
+	kvfeed.AbstractPart = pp.NewAbstractPart(kvaddr, &isStarted_callback_func)
 	
 	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
 	

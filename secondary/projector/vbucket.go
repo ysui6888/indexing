@@ -57,7 +57,8 @@ func NewVbucketRoutine(kvfeedRepr, bucket string, vbno uint16, vbuuid uint64) *V
 	vr.stats = vr.newStats()
 	
 	// uses vbno as the part Id  for VbucketRoutine
-	vr.AbstractPart = pp.NewAbstractPart(convertUintToString(vbno))
+	var isStarted_callback_func pp.IsStarted_Callback_Func = vr.IsStarted
+	vr.AbstractPart = pp.NewAbstractPart(convertUintToString(vbno), &isStarted_callback_func)
 	
 	c.Infof("%v ... created\n", vr.logPrefix)
 	return vr

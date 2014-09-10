@@ -77,7 +77,8 @@ func NewBucketFeed(
 	}
 	
 	// uses bucket name as the part Id  for BucketFeed
-	bfeed.AbstractPart = pp.NewAbstractPart(bucketn)
+	var isStarted_callback_func pp.IsStarted_Callback_Func = bfeed.IsStarted
+	bfeed.AbstractPart = pp.NewAbstractPart(bucketn, &isStarted_callback_func)
 	
 	bfeed.logPrefix = fmt.Sprintf("[%v]", bfeed.repr())
 	bfeed.stats = bfeed.newStats()

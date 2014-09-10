@@ -75,10 +75,11 @@ func NewEndpoint(feed *Feed, raddr string, n int, coord bool) (*Endpoint, error)
 	endpoint.stats = endpoint.newStats()
 	
 	// uses raddr as the part Id  for Endpoint
-	endpoint.AbstractPart = pp.NewAbstractPart(raddr)
+	var isStarted_callback_func pp.IsStarted_Callback_Func = endpoint.IsStarted
+	endpoint.AbstractPart = pp.NewAbstractPart(raddr, &isStarted_callback_func)
+
 	c.Infof("%v constructed (with %v conns) for feed %v ...\n",
 		endpoint.logPrefix, n, feed.Topic())
-
 	return endpoint, nil
 }
 
