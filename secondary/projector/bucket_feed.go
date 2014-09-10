@@ -328,11 +328,14 @@ func (bfeed *BucketFeed) doClose() (err error) {
 
 	// proceed to close the kvfeed
 	for _, kvfeed := range bfeed.kvfeeds {
-		kvfeed.Stop()
-		// moved the stopping of downstream VbucketRoutines from KVFeed to here since VbucketRoutines do not 
-		// need to stopped each time KVFeed is.
-		for _, vr := range kvfeed.Connector().DownStreams(){
-			vr.(*VbucketRoutine).Stop()
+	    // KVFeed may not have been started at this point, in which case there is no need to stop it
+		if kvfeed.IsStarted() {
+			kvfeed.Stop()
+			// moved the stopping of downstream VbucketRoutines from KVFeed to here since VbucketRoutines do not 
+			// need to stopped each time KVFeed is.
+			for _, vr := range kvfeed.Connector().DownStreams(){
+				vr.(*VbucketRoutine).Stop()
+			}
 		}
 	}
 	

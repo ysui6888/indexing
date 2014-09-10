@@ -75,7 +75,8 @@ func (feed *Feed) spawnBucketFeeds(pools, buckets []string) error {
 
 // gen-server API commands
 const (
-	fCmdUpdateFeed byte = iota + 1
+	fCmdRequestFeed byte = iota + 1
+	fCmdUpdateFeed
 	fCmdAddEngines
 	fCmdUpdateEngines
 	fCmdDeleteEngines
@@ -83,6 +84,25 @@ const (
 	fCmdGetStatistics
 	fCmdCloseFeed
 )
+
+// RequestFeed to start a new mutation stream, synchronous call.
+//
+// if error is returned then upstream instances of BucketFeed and KVFeed are
+// shutdown and application must retry the request or fall-back.
+// - ErrorInvalidRequest if request is malformed.
+// - error returned by couchbase client.
+// - error if KVFeed is already closed.
+func (feed *Feed) RequestFeed(request RequestReader) error {
+	if request == nil {
+		return ErrorArgument
+	} else if _, ok := request.(Subscriber); ok == false {
+		return ErrorRequestNotSubscriber
+	}
+	respch := make(chan []interface{}, 1)
+	cmd := []interface{}{fCmdRequestFeed, request, respch}
+	resp, err := c.FailsafeOp(feed.reqch, respch, cmd, feed.finch)
+	return c.OpError(err, resp, 0)
+}
 
 // UpdateFeed will start / restart / shutdown upstream vbuckets and update
 // downstream engines and endpoints, synchronous call.
@@ -185,6 +205,9 @@ loop:
 	for {
 		msg := <-reqch
 		switch msg[0].(byte) {
+		case fCmdRequestFeed:
+				req, respch := msg[1].(RequestReader), msg[2].(chan []interface{})
+				respch <- []interface{}{feed.requestFeed(req)}
 		case fCmdUpdateFeed:
 			req, respch := msg[1].(RequestReader), msg[2].(chan []interface{})
 			respch <- []interface{}{feed.updateFeed(req)}
@@ -751,7 +774,7 @@ func (feed *Feed) Start(settings map[string]interface{}) error {
 	
 	// preserve the old scheme prior to refactoring to minimize code changes.
 	// this will eventually get KVFeeds started
-	return feed.requestFeed(request)
+	return feed.RequestFeed(request)
 
 }
 
