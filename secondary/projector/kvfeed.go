@@ -57,6 +57,9 @@ import (
 // ErrorVBmap
 var ErrorVBmap = errors.New("kvfeed.vbmap")
 
+// ErrorVBList
+var ErrorEmptyVBList = errors.New("kvfeed.emptyVBList")
+
 // ErrorClientExited
 var ErrorClientExited = errors.New("kvfeed.clientExited")
 
@@ -70,6 +73,9 @@ var ErrorInvalidStartSettingsForKVFeed = errors.New("kvfeed.invalidStartSettings
 type KVFeed struct {
 	// Part
 	pp.AbstractPart 
+	// the list of vbuckets that the kvfeed is responsible for
+	// this allows multiple kvfeeds to be created for a kv node
+	vbnos  []uint16  
 	// immutable fields
 	kvaddr  string
 	bucket  BucketAccess
@@ -92,12 +98,14 @@ type KVFeed struct {
 //
 // if error, KVFeed is not started
 // - error returned by couchbase client
-func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket) (*KVFeed, error) {
+func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbnos  []uint16) (*KVFeed, error) {
 	kvfeed := &KVFeed{
+		vbnos: vbnos,
 		kvaddr: kvaddr,
 		bucket: bucket,
 		parentRepr: parentRepr,
 	}
+	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
 	
 	// uses kvaddr as the part Id  for KVFeed
 	var isStarted_callback_func pp.IsStarted_Callback_Func = kvfeed.IsStarted
@@ -107,11 +115,21 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket) (*KV
 	} else {
 		// default the id of kvfeed to kvaddr if not specified
 		kvfeedId = kvaddr
-	}
-	
+	}	
 	kvfeed.AbstractPart = pp.NewAbstractPart(kvfeedId, &isStarted_callback_func)
 	
-	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
+	if kvfeed.vbnos == nil {
+		// if vbnos is not specified, default it to all vbuckets in the kv node
+		m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.kvaddr})
+		if err != nil {
+			c.Errorf("%v bucket.GetVBmap() %v \n", kvfeed.logPrefix, err)
+			return nil, err
+		}
+		kvfeed.vbnos = m[kvfeed.kvaddr]
+		if kvfeed.vbnos == nil {
+			return nil, ErrorVBmap
+		}
+	}
 	
 	c.Infof("%v kvfeed created ...\n", kvfeed.logPrefix)
 	
@@ -120,6 +138,10 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket) (*KV
 
 func (kvfeed *KVFeed) repr() string {
 	return fmt.Sprintf("%v:%v", kvfeed.parentRepr, kvfeed.Id())
+}
+
+func (kvfeed *KVFeed) KVAddr() string {
+	return kvfeed.kvaddr
 }
 
 // APIs to gen-server
@@ -184,6 +206,7 @@ loop:
 
 // start, restart or shutdown streams
 func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
+	var err error
 	prefix := kvfeed.logPrefix
 	
 	c.Debugf("%v updating feed ...", prefix)
@@ -196,22 +219,12 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 	}
 
 	// refresh vbmap before fetching it.
-	if err := kvfeed.bucket.Refresh(); err != nil {
+	if err = kvfeed.bucket.Refresh(); err != nil {
 		c.Errorf("%v bucket.Refresh() %v \n", prefix, err)
 	}
 
-	m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.kvaddr})
-	if err != nil {
-		c.Errorf("%v bucket.GetVBmap() %v \n", prefix, err)
-		return err
-	}
-	vbnos := m[kvfeed.kvaddr]
-	if vbnos == nil {
-		return ErrorVBmap
-	}
-
 	// filter vbuckets for this kvfeed.
-	ts = ts.SelectByVbuckets(vbnos)
+	ts = ts.SelectByVbuckets(kvfeed.vbnos)
 	
 	settings := ConstructStartSettingsForKVFeed(ts)
 
@@ -388,4 +401,13 @@ func(kvfeed *KVFeed) Close() error {
 
 func(kvfeed *KVFeed) IsOpen() bool {
 	return false
+}
+
+// Set vb list in kvfeed
+func(kvfeed *KVFeed) SetVBList(vbnos []uint16) error {
+	if len(vbnos) == 0 {
+		return ErrorEmptyVBList
+	}
+	kvfeed.vbnos = vbnos
+	return nil
 }

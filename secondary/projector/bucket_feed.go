@@ -92,7 +92,7 @@ func NewBucketFeed(
 	
 	// initialize KVFeeds
 	for _, kvaddr := range kvaddrs {		
-		kvfeed, err := NewKVFeed(kvaddr, bfeed.repr(), kvaddr, bucket)
+		kvfeed, err := NewKVFeed(kvaddr, bfeed.repr(), kvaddr, bucket, nil/*vbnos*/)
 		if err != nil {
 			bfeed.doClose()
 			return nil, err
