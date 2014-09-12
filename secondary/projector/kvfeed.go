@@ -120,14 +120,8 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbno
 	
 	if kvfeed.vbnos == nil {
 		// if vbnos is not specified, default it to all vbuckets in the kv node
-		m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.kvaddr})
-		if err != nil {
-			c.Errorf("%v bucket.GetVBmap() %v \n", kvfeed.logPrefix, err)
+		if err := kvfeed.setVBListFromBucket(); err != nil {
 			return nil, err
-		}
-		kvfeed.vbnos = m[kvfeed.kvaddr]
-		if kvfeed.vbnos == nil {
-			return nil, ErrorVBmap
 		}
 	}
 	
@@ -138,10 +132,6 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbno
 
 func (kvfeed *KVFeed) repr() string {
 	return fmt.Sprintf("%v:%v", kvfeed.parentRepr, kvfeed.Id())
-}
-
-func (kvfeed *KVFeed) KVAddr() string {
-	return kvfeed.kvaddr
 }
 
 // APIs to gen-server
@@ -218,9 +208,9 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 		return c.ErrorInvalidRequest
 	}
 
-	// refresh vbmap before fetching it.
-	if err = kvfeed.bucket.Refresh(); err != nil {
-		c.Errorf("%v bucket.Refresh() %v \n", prefix, err)
+    // update vb list in kvfeed using the up-to-date vb list from bucket
+	if err := kvfeed.setVBListFromBucket(); err != nil {
+		return err
 	}
 
 	// filter vbuckets for this kvfeed.
@@ -409,5 +399,24 @@ func(kvfeed *KVFeed) SetVBList(vbnos []uint16) error {
 		return ErrorEmptyVBList
 	}
 	kvfeed.vbnos = vbnos
+	return nil
+}
+
+// set vb list of kvfeed to that in bucket
+func(kvfeed *KVFeed) setVBListFromBucket() error {
+	// refresh vbmap before fetching it.
+	if err := kvfeed.bucket.Refresh(); err != nil {
+		c.Errorf("%v bucket.Refresh() %v \n", kvfeed.logPrefix, err)
+	}
+
+	m, err := kvfeed.bucket.GetVBmap([]string{kvfeed.kvaddr})
+	if err != nil {
+		c.Errorf("%v bucket.GetVBmap() %v \n", kvfeed.logPrefix, err)
+		return err
+	}
+	kvfeed.vbnos = m[kvfeed.kvaddr]
+	if kvfeed.vbnos == nil {
+		return ErrorVBmap
+	}
 	return nil
 }
