@@ -90,6 +90,7 @@ type KVFeed struct {
 	// indicates whether the KVFeed has been started
 	started  bool  
 	done sync.WaitGroup //makes KVFeed wait on the two go routines it spawns before it can declare itself stopped
+	stats     c.Statistics
 }
 
 // NewKVFeed create a new feed from `kvaddr` node for a single bucket. Uses
