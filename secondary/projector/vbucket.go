@@ -40,7 +40,6 @@ type VbucketRoutine struct {
 	kvfeedRepr string
 	logPrefix string
 	stats c.Statistics
-	started bool
 }
 
 // NewVbucketRoutine creates a new routine to handle this vbucket stream.
@@ -287,14 +286,10 @@ func (vr *VbucketRoutine) debugCtrlPath(endpoints map[string]*Endpoint, engines 
 func (vr *VbucketRoutine) Start(settings map[string]interface{}) error {
 	go vr.run(vr.reqch)
 	c.Infof("%v ... started\n", vr.logPrefix)
-	vr.started = true
 	return nil
 }
 func (vr *VbucketRoutine) Stop() error {
 	err := vr.Close()
-	if err == nil {
-		vr.started = false
-	}
 	return err
 }
 
@@ -308,5 +303,5 @@ func (vr *VbucketRoutine) Receive (data interface{}) error {
 }
 
 func (vr *VbucketRoutine) IsStarted() bool {
-	return vr.started
+	return false
 }

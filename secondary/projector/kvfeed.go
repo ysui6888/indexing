@@ -89,6 +89,8 @@ type KVFeed struct {
 	logPrefix string
 	// indicates whether the KVFeed has been started
 	started  bool  
+	// RW lock for started flag
+	startLock sync.RWMutex
 	done sync.WaitGroup //makes KVFeed wait on the two go routines it spawns before it can declare itself stopped
 	stats     c.Statistics
 }
@@ -200,7 +202,7 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 	var err error
 	prefix := kvfeed.logPrefix
 	
-	c.Debugf("%v updating feed ...", prefix)
+	c.Debugf("%v requestFeed ...", prefix)
 
 	// fetch restart-timestamp from request
 	ts := req.RestartTimestamp(kvfeed.bucket.(*couchbase.Bucket).Name)
@@ -227,10 +229,14 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 		err = kvfeed.Start(settings)
 
 	} else if req.IsRestart() { // restart implies a shutdown and start
-		if err = kvfeed.Stop(); err == nil {
-			// TODO may need to compute restart timestamp based on shutdown timestamp instead of directly using the latter  
-			err = kvfeed.Start(settings)
+		// kvfeed may be new and not started. If so there is no need to stop it
+		if kvfeed.IsStarted() {
+			if err = kvfeed.Stop(); err != nil {
+				return err
+			}
 		}
+		// TODO may need to compute restart timestamp based on shutdown timestamp instead of directly using the latter  
+		err = kvfeed.Start(settings)
 
 	} else if req.IsShutdown() { // shutdown
 		err = kvfeed.Stop()
@@ -324,6 +330,9 @@ func parseStartSettingsForKVFeed(settings map[string]interface{}) (*protobuf.TsV
 
 // start KVFeed by starting VB stream on feeder
 func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
+	kvfeed.startLock.Lock()
+	defer kvfeed.startLock.Unlock()
+	
 	// initializes feeder in KVFeed
 	feeder, err := OpenKVFeed(kvfeed.bucket.(*couchbase.Bucket), kvfeed.kvaddr, kvfeed)
 	if err != nil {
@@ -363,11 +372,15 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 }
 
 func(kvfeed *KVFeed) Stop() error {
+	kvfeed.startLock.Lock()
+	defer kvfeed.startLock.Unlock()
+	
 	err := kvfeed.CloseFeed()
 	if err == nil {
 		kvfeed.started = false
 		kvfeed.done.Wait() // wait for both go rountines, gen-server and runScatter, to stop
 	}
+	c.Infof("%v stopped ...\n", kvfeed.logPrefix)
 	return err	
 }
 
@@ -377,6 +390,9 @@ func (kvfeed *KVFeed) Receive (data interface{}) error {
 }
 
 func (kvfeed *KVFeed) IsStarted() bool {
+	kvfeed.startLock.RLock()
+	defer kvfeed.startLock.RUnlock()
+	
 	return kvfeed.started
 }
 
