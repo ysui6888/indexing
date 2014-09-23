@@ -34,7 +34,7 @@ func mainAdminPort(laddr string, p *Projector) {
 	var err error
 
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("projector", laddr, c.AdminportURLPrefix, reqch)
+	server := ap.NewHTTPServer("projector", laddr, c.AdminportURLPrefix, reqch, new(ap.Handler))
 	server.Register(reqVbmap)
 	server.Register(reqFailoverLog)
 	server.Register(reqMutationFeed)
