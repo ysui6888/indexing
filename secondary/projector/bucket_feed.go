@@ -54,8 +54,6 @@ type BucketFeed struct {
 	// misc.
 	logPrefix string
 	stats     c.Statistics
-	// indicates whether the BucketFeed has been started
-	started  bool  
 }
 
 // NewBucketFeed creates a new instance of feed for specified bucket. 
@@ -351,16 +349,11 @@ func (bfeed *BucketFeed) doClose() (err error) {
 func (bfeed *BucketFeed) Start(settings map[string]interface{}) error {
 	go bfeed.genServer(bfeed.reqch)
 	c.Infof("%v started ...\n", bfeed.logPrefix)
-	
-	bfeed.started = true
 	return nil
 }
 
 func (bfeed *BucketFeed) Stop() error {
 	err := bfeed.CloseFeed() 
-	if err == nil {
-		bfeed.started = false
-	} 
 	return err
 }
 
@@ -369,8 +362,9 @@ func (bfeed *BucketFeed) Receive (data interface{}) error {
 	return nil
 }
 
+// method not used now and return value does not matter
 func (bfeed *BucketFeed) IsStarted() bool {
-	return bfeed.started
+	return false
 }
 
 // implements Nozzle

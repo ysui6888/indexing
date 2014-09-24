@@ -10,6 +10,7 @@ package adminport
 import (
 	"errors"
 	c "github.com/couchbase/indexing/secondary/common"
+	"net/http"
 )
 
 // errors codes
@@ -37,6 +38,8 @@ var ErrorDecodeResponse = errors.New("adminport.decodeResponse")
 
 // ErrorInternal
 var ErrorInternal = errors.New("adminport.internal")
+
+var ErrorInvalidServerType = errors.New("adminport.invalidServerType")
 
 // MessageMarshaller API abstracts the underlying messaging format. For instance,
 // in case of protobuf defined structures, respective structure definition
@@ -85,6 +88,12 @@ type Server interface {
 	// Stop server routine. TODO: server routine shall quite only after
 	// outstanding requests are serviced.
 	Stop()
+	
+	// Get registered messages
+    GetMessages() map[string]MessageMarshaller
+    
+    // Process message
+    ProcessMessage(msg MessageMarshaller) interface{}
 }
 
 // Client API for a remote adminport
@@ -96,4 +105,13 @@ type Client interface {
 
 	// RequestStats shall get Statistics
 	RequestStats(response MessageMarshaller) (err error)
+}
+
+// handler for Request
+type RequestHandler interface{
+        // extends http.Handler interface 
+        http.Handler
+        // sets server, which will be doing the actual handling
+        SetServer(Server) error
+        GetServer() Server
 }

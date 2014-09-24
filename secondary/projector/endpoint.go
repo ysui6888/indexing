@@ -51,7 +51,6 @@ type Endpoint struct {
 	timestamp int64
 	logPrefix string
 	stats     c.Statistics
-	started bool
 }
 
 // NewEndpoint instanstiat a new Endpoint routine and return its reference.
@@ -279,16 +278,11 @@ func(endpoint *Endpoint) Start(settings map[string]interface{}) error {
 	go endpoint.run(endpoint.kvch, endpoint.reqch)
 	c.Infof("%v started for feed %v ...\n",
 		endpoint.logPrefix, endpoint.feed.Topic())
-	endpoint.started = true
 	return nil
 }
 
 func(endpoint *Endpoint) Stop() error {
-	err := endpoint.CloseEndpoint()
-	if err == nil {
-		endpoint.started = false
-	}
-	return nil
+	return  endpoint.CloseEndpoint()
 }
 
 func (endpoint *Endpoint) Receive (data interface{}) error {
@@ -302,7 +296,7 @@ func (endpoint *Endpoint) Receive (data interface{}) error {
 }
 
 func (endpoint *Endpoint) IsStarted() bool {
-	return endpoint.started
+	return false
 }
 
 // implements Nozzle

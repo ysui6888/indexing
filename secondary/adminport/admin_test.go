@@ -83,7 +83,7 @@ func BenchmarkClientRequest(b *testing.B) {
 
 func doServer(addr string, quit chan bool) Server {
 	urlPrefix, reqch := common.AdminportURLPrefix, make(chan Request, 10)
-	server := NewHTTPServer("test", "localhost:9999", urlPrefix, reqch)
+	server := NewHTTPServer("test", "localhost:9999", urlPrefix, reqch, new(Handler))
 	if err := server.Register(&testMessage{}); err != nil {
 		log.Fatal(err)
 	}

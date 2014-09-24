@@ -42,7 +42,7 @@ import (
 
 // httpServer is a concrete type implementing adminport Server interface.
 type httpServer struct {
-	mu        sync.Mutex   // handle concurrent updates to this object
+	mu        sync.RWMutex   // handle concurrent updates to this object
 	lis       net.Listener // TCP listener
 	srv       *http.Server // http server
 	urlPrefix string       // URL path prefix for adminport
@@ -55,15 +55,18 @@ type httpServer struct {
 
 // NewHTTPServer creates an instance of admin-server. Start() will actually
 // start the server.
-func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request) Server {
+func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request, handler RequestHandler) Server {
+
 	s := &httpServer{
 		reqch:     reqch,
 		messages:  make(map[string]MessageMarshaller),
 		urlPrefix: urlPrefix,
 		logPrefix: fmt.Sprintf("[%s:%s]", name, connAddr),
 	}
+	c.Infof("%v new http server %v %v %v\n", s.logPrefix, name, connAddr, urlPrefix)
 	mux := http.NewServeMux()
-	mux.HandleFunc(s.urlPrefix, s.systemHandler)
+    mux.Handle(s.urlPrefix, handler)
+    handler.SetServer(s)
 	s.srv = &http.Server{
 		Addr:           connAddr,
 		Handler:        mux,
@@ -103,6 +106,22 @@ func (s *httpServer) Unregister(msg MessageMarshaller) (err error) {
 	delete(s.messages, name)
 	c.Infof("%s unregistered %s\n", s.logPrefix, s.getURL(msg))
 	return
+}
+
+func (s *httpServer) GetMessages() map[string]MessageMarshaller {
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        
+        return s.messages
+}
+
+func (s *httpServer) ProcessMessage(msg MessageMarshaller) interface{} {
+        waitch := make(chan interface{}, 1)
+        // send and wait
+        s.reqch <- &httpAdminRequest{srv: s, msg: msg, waitch: waitch}
+        val := <-waitch
+        
+        return val
 }
 
 // Start is part of Server interface.
@@ -157,6 +176,8 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 	var statPath string
 
 	c.Infof("%s Request %q\n", s.logPrefix, r.URL.Path)
+	c.Infof("%s HTTP Request %v\n", s.logPrefix, r)
+	c.Infof("%s HTTP Request body %v\n", s.logPrefix, r.Body)
 
 	// Fault-tolerance. No need to crash the server in case of panic.
 	defer func() {
@@ -199,6 +220,8 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	
+	c.Infof("%s HTTP Request Msg %v\n", s.logPrefix, msg)
 
 	statPath = "request." + msg.Name()
 	s.stats.Incr(statPath, 1, 0, 0) // count request
@@ -209,10 +232,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	waitch := make(chan interface{}, 1)
-	// send and wait
-	s.reqch <- &httpAdminRequest{srv: s, msg: msg, waitch: waitch}
-	val := <-waitch
+	 val := s.ProcessMessage(msg)
 
 	switch v := (val).(type) {
 	case c.Statistics:
@@ -290,3 +310,26 @@ func (r *httpAdminRequest) SendError(err error) error {
 	close(r.waitch)
 	return nil
 }
+
+//secondary index implementaton of RequestHandler 
+type Handler struct{
+        server  *httpServer
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+        h.server.systemHandler(w, r)
+}
+
+func (h *Handler) SetServer(s Server) error {
+        server, ok := s.(*httpServer)
+        if !ok {
+                return ErrorInvalidServerType
+        }
+        h.server = server
+        return nil
+}
+
+func (h *Handler) GetServer() Server {
+        return h.server
+}
+
