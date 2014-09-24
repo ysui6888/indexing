@@ -158,7 +158,7 @@ func NewProjector(cluster string, kvaddrs []string, adminport string) *Projector
 		finch:     make(chan bool),
 	}
 	// set the pipelineFactory in pipelineManager to FeedFactory
-	pm.PipelineManager(&feed_factory);
+	pm.PipelineManager(&feed_factory, nil);
 	p.logPrefix = fmt.Sprintf("[%v]", p.repr())
 	go mainAdminPort(adminport, p)
 	go p.genServer(p.reqch)

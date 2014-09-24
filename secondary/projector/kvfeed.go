@@ -44,12 +44,13 @@ package projector
 import (
 	"errors"
 	"fmt"
-	"sync"
+	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/couchbaselabs/go-couchbase"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	"runtime"
+	"sync"
 )
 
 // error codes
@@ -72,21 +73,21 @@ var ErrorInvalidStartSettingsForKVFeed = errors.New("kvfeed.invalidStartSettings
 // KVFeed is per bucket, per node feed for a subset of vbuckets
 type KVFeed struct {
 	// Part
-	pp.AbstractPart 
+	pp.AbstractPart
 	// the list of vbuckets that the kvfeed is responsible for
 	// this allows multiple kvfeeds to be created for a kv node
-	vbnos  []uint16  
+	vbnos []uint16
 	// immutable fields
-	kvaddr  string
-	bucket  BucketAccess
-	feeder  KVFeeder
+	kvaddr   string
+	bucket   BucketAccess
+	feeder   KVFeeder
 	// gen-server
 	reqch chan []interface{}
 	finch chan bool
 	// misc.
 	// repr of parent/calling module
-	parentRepr string   
-	logPrefix string
+	parentRepr string
+	logPrefix  string
 	// indicates whether the KVFeed has been started
 	started  bool  
 	// RW lock for started flag
@@ -101,15 +102,15 @@ type KVFeed struct {
 //
 // if error, KVFeed is not started
 // - error returned by couchbase client
-func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbnos  []uint16) (*KVFeed, error) {
+func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbnos []uint16) (*KVFeed, error) {
 	kvfeed := &KVFeed{
-		vbnos: vbnos,
-		kvaddr: kvaddr,
-		bucket: bucket,
+		vbnos:      vbnos,
+		kvaddr:     kvaddr,
+		bucket:     bucket,
 		parentRepr: parentRepr,
-	}
+    }
 	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
-	
+
 	// uses kvaddr as the part Id  for KVFeed
 	var isStarted_callback_func pp.IsStarted_Callback_Func = kvfeed.IsStarted
 	var kvfeedId string
@@ -118,18 +119,18 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbno
 	} else {
 		// default the id of kvfeed to kvaddr if not specified
 		kvfeedId = kvaddr
-	}	
+	}
 	kvfeed.AbstractPart = pp.NewAbstractPart(kvfeedId, &isStarted_callback_func)
-	
+
 	if kvfeed.vbnos == nil {
 		// if vbnos is not specified, default it to all vbuckets in the kv node
 		if err := kvfeed.setVBListFromBucket(); err != nil {
 			return nil, err
 		}
 	}
-	
+
 	c.Infof("%v kvfeed created ...\n", kvfeed.logPrefix)
-	
+
 	return kvfeed, nil
 }
 
@@ -165,6 +166,11 @@ func (kvfeed *KVFeed) CloseFeed() error {
 	respch := make(chan []interface{}, 1)
 	cmd := []interface{}{kvfCmdCloseFeed, respch}
 	resp, err := c.FailsafeOp(kvfeed.reqch, respch, cmd, kvfeed.finch)
+	if err != nil {
+		c.Errorf("CloseFeed failed: err=%v\n", err)
+	}
+
+	close(kvfeed.finch)
 	return c.OpError(err, resp, 0)
 }
 
@@ -193,8 +199,9 @@ loop:
 			break loop
 		}
 	}
-	
+
 	kvfeed.done.Done()
+
 }
 
 // start, restart or shutdown streams
@@ -211,14 +218,14 @@ func (kvfeed *KVFeed) requestFeed(req RequestReader) error {
 		return c.ErrorInvalidRequest
 	}
 
-    // update vb list in kvfeed using the up-to-date vb list from bucket
+	// update vb list in kvfeed using the up-to-date vb list from bucket
 	if err := kvfeed.setVBListFromBucket(); err != nil {
 		return err
 	}
 
 	// filter vbuckets for this kvfeed.
 	ts = ts.SelectByVbuckets(kvfeed.vbnos)
-	
+
 	settings := ConstructStartSettingsForKVFeed(ts)
 
 	c.Debugf("start: %v restart: %v shutdown: %v\n",
@@ -257,11 +264,14 @@ func (kvfeed *KVFeed) doClose() error {
 	}()
 
 	// closing KVFeed will not stop downstream VbucketRoutines, which will be stopped by BucketFeed when BucketFeed is stopped
-	
+
 	// close upstream
 	kvfeed.feeder.CloseKVFeed()
-	close(kvfeed.finch)
 	c.Infof("%v ... stopped\n", kvfeed.logPrefix)
+	trace := make([]byte, 1024)
+	count := runtime.Stack(trace, true)
+	c.Infof("Stack of %d bytes: %s", count, trace)
+
 	return nil
 }
 
@@ -275,54 +285,56 @@ func (kvfeed *KVFeed) runScatter() {
 
 	mutch := kvfeed.feeder.GetChannel()
 	finch := kvfeed.finch
-	
+
 loop:
 	for {
 		select {
-			case m, ok := <-mutch: // mutation from upstream
-				if ok == false {
-					kvfeed.CloseFeed()
-					break loop
-				}
-				c.Tracef("%v, Mutation %v:%v:%v <%v>\n",
-					kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key)
-				// forward mutation downstream through connector
-				if err := kvfeed.Connector().Forward(m); err != nil {
-					c.Errorf("%v error forwarding uprEvent for vbucket(%v) %v", kvfeed.logPrefix, m.VBucket, err)
-				}
-				// raise event for statistics collection
-				kvfeed.RaiseEvent(pc.DataProcessed, nil/*item*/, kvfeed, nil/*derivedItems*/, nil/*otherInfos*/)
-			// stop runScatter() if finch is closed, which indicates that the KVFeed is being stopped
-			case <-finch:
-				break loop  
+		case m, ok := <-mutch: // mutation from upstream
+			if ok == false {
+				kvfeed.CloseFeed()
+				break loop
+			}
+			c.Tracef("%v, Mutation %v:%v:%v <%v>\n",
+				kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key)
+			// forward mutation downstream through connector
+			if err := kvfeed.Connector().Forward(m); err != nil {
+				c.Errorf("%v error forwarding uprEvent for vbucket(%v) %v", kvfeed.logPrefix, m.VBucket, err)
+			}
+			// raise event for statistics collection
+			kvfeed.RaiseEvent(pc.DataProcessed, nil /*item*/, kvfeed, nil /*derivedItems*/, nil /*otherInfos*/)
+		// stop runScatter() if finch is closed, which indicates that the KVFeed is being stopped
+		case <-finch:
+			break loop
 		}
 	}
-	
+
 	kvfeed.done.Done()
 }
 
 // construct start settings for KVFeed, which contains a single restart timestamp
 func ConstructStartSettingsForKVFeed(ts *protobuf.TsVbuuid) map[string]interface{} {
-		settings := make(map[string]interface{})
-		// The "Key" key is never used and carries no significance
-		settings["Key"] = ts
-		
+	settings := make(map[string]interface{})
+	// The "Key" key is never used and carries no significance
+	settings["Key"] = ts
+
 	return settings
 }
 
 // parse out restart timestamp from start settings
 func parseStartSettingsForKVFeed(settings map[string]interface{}) (*protobuf.TsVbuuid, error) {
 	var ts *protobuf.TsVbuuid
-	var ok bool 
+	var ok bool
+
+	c.Debugf("length of the settings is %d\n", len(settings))
 	if len(settings) != 1 {
 		return nil, ErrorInvalidStartSettingsForKVFeed
 	}
 	for _, setting := range settings {
 		if ts, ok = setting.(*protobuf.TsVbuuid); !ok {
 			return nil, ErrorInvalidStartingSettingsForFeed
-		} 
+		}
 	}
-	
+
 	return ts, nil
 }
 
@@ -332,40 +344,43 @@ func parseStartSettingsForKVFeed(settings map[string]interface{}) (*protobuf.TsV
 func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 	kvfeed.startLock.Lock()
 	defer kvfeed.startLock.Unlock()
-	
+
 	// initializes feeder in KVFeed
+	c.Debugf("%v KVFeed Start....\n", kvfeed.logPrefix)
+	// parse start settings
+
 	feeder, err := OpenKVFeed(kvfeed.bucket.(*couchbase.Bucket), kvfeed.kvaddr, kvfeed)
 	if err != nil {
-		c.Errorf("%v OpenKVFeed(): %v\n", kvfeed.logPrefix, err)
+		c.Errorf("%v OpenKVFeed(): %v, id=%v, vbnos=%v\n", kvfeed.logPrefix, err, kvfeed.Id(), kvfeed.vbnos)
 		return err
 	}
 	kvfeed.feeder = feeder.(KVFeeder)
-	
+
 	// initializes channels
 	kvfeed.reqch = make(chan []interface{}, c.GenserverChannelSize)
 	kvfeed.finch = make(chan bool)
-	
-	
-	// parse start settings 
-	ts, err := parseStartSettingsForKVFeed(settings);
-	if  err != nil {
+
+	ts, err := parseStartSettingsForKVFeed(settings)
+	if err != nil {
+		c.Errorf("Failed to parse setting for KVFeed. err=%v\n", err)
 		return err
 	}
-	
+	c.Debugf("%v KVFeed Start - finish parsing settings\n", kvfeed.logPrefix)
+
 	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
 	if err != nil {
 		return err
 	}
-	
+
 	go kvfeed.genServer(kvfeed.reqch)
 	go kvfeed.runScatter()
-	
+
 	c.Debugf("%v start-timestamp %#v\n", kvfeed.logPrefix, ts)
 	if _, _, err = kvfeed.feeder.StartVbStreams(flogs, ts); err != nil {
 		c.Errorf("%v feeder.StartVbStreams() %v", kvfeed.logPrefix, err)
 	}
 
-	kvfeed.done.Add(2)  // waiting for two go rountines, gen-server and runScatter 
+	kvfeed.done.Add(2) // waiting for two go rountines, gen-server and runScatter
 	kvfeed.started = true
 	c.Infof("%v started ...\n", kvfeed.logPrefix)
 	return err
@@ -374,17 +389,18 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 func(kvfeed *KVFeed) Stop() error {
 	kvfeed.startLock.Lock()
 	defer kvfeed.startLock.Unlock()
-	
+
 	err := kvfeed.CloseFeed()
 	if err == nil {
 		kvfeed.started = false
 		kvfeed.done.Wait() // wait for both go rountines, gen-server and runScatter, to stop
 	}
+
 	c.Infof("%v stopped ...\n", kvfeed.logPrefix)
 	return err	
 }
 
-func (kvfeed *KVFeed) Receive (data interface{}) error {
+func (kvfeed *KVFeed) Receive(data interface{}) error {
 	// KVFeed is a source nozzle and does not receive from upstream nodes
 	return nil
 }
@@ -398,20 +414,20 @@ func (kvfeed *KVFeed) IsStarted() bool {
 
 // implements Nozzle
 // methods not actively used and not implemented
-func(kvfeed *KVFeed) Open() error {
+func (kvfeed *KVFeed) Open() error {
 	return nil
 }
 
-func(kvfeed *KVFeed) Close() error {
+func (kvfeed *KVFeed) Close() error {
 	return nil
 }
 
-func(kvfeed *KVFeed) IsOpen() bool {
+func (kvfeed *KVFeed) IsOpen() bool {
 	return false
 }
 
 // Set vb list in kvfeed
-func(kvfeed *KVFeed) SetVBList(vbnos []uint16) error {
+func (kvfeed *KVFeed) SetVBList(vbnos []uint16) error {
 	if len(vbnos) == 0 {
 		return ErrorEmptyVBList
 	}
@@ -419,8 +435,12 @@ func(kvfeed *KVFeed) SetVBList(vbnos []uint16) error {
 	return nil
 }
 
+func (kvfeed *KVFeed) GetVBList() []uint16 {
+	return kvfeed.vbnos
+}
+
 // set vb list of kvfeed to that in bucket
-func(kvfeed *KVFeed) setVBListFromBucket() error {
+func (kvfeed *KVFeed) setVBListFromBucket() error {
 	// refresh vbmap before fetching it.
 	if err := kvfeed.bucket.Refresh(); err != nil {
 		c.Errorf("%v bucket.Refresh() %v \n", kvfeed.logPrefix, err)
