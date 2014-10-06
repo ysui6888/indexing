@@ -31,6 +31,7 @@ import (
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/transport"
 	"github.com/couchbase/indexing/secondary/dataport"
+	"github.com/couchbase/indexing/secondary/transport"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 )
 

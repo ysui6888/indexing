@@ -300,8 +300,8 @@ loop:
 				break loop
 			}
 			kvfeed.counter ++
-//			c.Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
-//				kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key, kvfeed.counter, float64(kvfeed.counter)/time.Since(kvfeed.start_time).Seconds())
+			c.Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
+				kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key, kvfeed.counter, float64(kvfeed.counter)/time.Since(kvfeed.start_time).Seconds())
 			c.Debugf("%v ops_per_sec=%v\n",
 				kvfeed.Id(), float64(kvfeed.counter)/time.Since(kvfeed.start_time).Seconds())
 
@@ -317,6 +317,7 @@ loop:
 		}
 	}
 
+	kvfeed.done.Done()
 }
 
 // construct start settings for KVFeed, which contains a single restart timestamp
@@ -352,7 +353,7 @@ func parseStartSettingsForKVFeed(settings map[string]interface{}) (*protobuf.TsV
 func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 	kvfeed.startLock.Lock()
 	defer kvfeed.startLock.Unlock()
-	
+
 	// initializes feeder in KVFeed
 	c.Debugf("%v KVFeed Start....\n", kvfeed.logPrefix)
 	// parse start settings
@@ -374,6 +375,8 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 		return err
 	}
 	c.Debugf("%v KVFeed Start - finish parsing settings\n", kvfeed.logPrefix)
+
+	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
 
 //	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
 //	if err != nil {
@@ -399,12 +402,13 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 func(kvfeed *KVFeed) Stop() error {
 	kvfeed.startLock.Lock()
 	defer kvfeed.startLock.Unlock()
-	
+
 	err := kvfeed.CloseFeed()
 	if err == nil {
 		kvfeed.started = false
 		kvfeed.done.Wait() // wait for both go rountines, gen-server and runScatter, to stop
 	}
+
 	c.Infof("%v stopped ...\n", kvfeed.logPrefix)
 	return err	
 }
