@@ -89,7 +89,7 @@ func (kv *kvUpr) StartVbStreams(
 	flogs couchbase.FailoverLog,
 	restartTs *protobuf.TsVbuuid) (failoverTs, kvTs *protobuf.TsVbuuid, err error) {
 
-	failoverTs = restartTs.ComputeFailoverTs(flogs)
+//	failoverTs = restartTs.ComputeFailoverTs(flogs)
 
 	for i, vbno := range c.Vbno32to16(restartTs.Vbnos) {
 		snapshots := restartTs.Snapshots
@@ -103,7 +103,7 @@ func (kv *kvUpr) StartVbStreams(
 			return nil, nil, err
 		}
 	}
-	return failoverTs, restartTs, nil
+	return nil, restartTs, nil
 }
 
 func (kv *kvUpr) EndVbStreams(endTs *protobuf.TsVbuuid) (err error) {
@@ -111,5 +111,5 @@ func (kv *kvUpr) EndVbStreams(endTs *protobuf.TsVbuuid) (err error) {
 }
 
 func (kv *kvUpr) CloseKVFeed() (err error) {
-	return nil
+	return kv.uprFeed.Close()
 }

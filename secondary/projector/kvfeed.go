@@ -51,6 +51,7 @@ import (
 	"github.com/couchbaselabs/go-couchbase"
 	"runtime"
 	"sync"
+	"time"
 )
 
 // error codes
@@ -94,6 +95,8 @@ type KVFeed struct {
 	startLock sync.RWMutex
 	done sync.WaitGroup //makes KVFeed wait on the two go routines it spawns before it can declare itself stopped
 	stats     c.Statistics
+	counter	int
+	start_time time.Time
 }
 
 // NewKVFeed create a new feed from `kvaddr` node for a single bucket. Uses
@@ -108,6 +111,7 @@ func NewKVFeed(kvaddr, parentRepr, partId string, bucket *couchbase.Bucket, vbno
 		kvaddr:     kvaddr,
 		bucket:     bucket,
 		parentRepr: parentRepr,
+		counter: 0,
     }
 	kvfeed.logPrefix = fmt.Sprintf("[%v]", kvfeed.repr())
 
@@ -281,6 +285,7 @@ func (kvfeed *KVFeed) runScatter() {
 		if r := recover(); r != nil {
 			c.Errorf("%v runScatter() panic: %v\n", kvfeed.logPrefix, r)
 		}
+		kvfeed.done.Done()
 	}()
 
 	mutch := kvfeed.feeder.GetChannel()
@@ -294,8 +299,12 @@ loop:
 				kvfeed.CloseFeed()
 				break loop
 			}
-			c.Tracef("%v, Mutation %v:%v:%v <%v>\n",
-				kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key)
+			kvfeed.counter ++
+//			c.Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
+//				kvfeed.logPrefix, m.VBucket, m.Seqno, m.Opcode, m.Key, kvfeed.counter, float64(kvfeed.counter)/time.Since(kvfeed.start_time).Seconds())
+			c.Debugf("%v ops_per_sec=%v\n",
+				kvfeed.Id(), float64(kvfeed.counter)/time.Since(kvfeed.start_time).Seconds())
+
 			// forward mutation downstream through connector
 			if err := kvfeed.Connector().Forward(m); err != nil {
 				c.Errorf("%v error forwarding uprEvent for vbucket(%v) %v", kvfeed.logPrefix, m.VBucket, err)
@@ -308,7 +317,6 @@ loop:
 		}
 	}
 
-	kvfeed.done.Done()
 }
 
 // construct start settings for KVFeed, which contains a single restart timestamp
@@ -367,16 +375,18 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 	}
 	c.Debugf("%v KVFeed Start - finish parsing settings\n", kvfeed.logPrefix)
 
-	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
-	if err != nil {
-		return err
-	}
+//	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
+//	if err != nil {
+//		return err
+//	}
 
+	kvfeed.start_time = time.Now()
+	
 	go kvfeed.genServer(kvfeed.reqch)
 	go kvfeed.runScatter()
 
 	c.Debugf("%v start-timestamp %#v\n", kvfeed.logPrefix, ts)
-	if _, _, err = kvfeed.feeder.StartVbStreams(flogs, ts); err != nil {
+	if _, _, err = kvfeed.feeder.StartVbStreams(nil, ts); err != nil {
 		c.Errorf("%v feeder.StartVbStreams() %v", kvfeed.logPrefix, err)
 	}
 

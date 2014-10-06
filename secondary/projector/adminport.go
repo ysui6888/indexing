@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"code.google.com/p/goprotobuf/proto"
-	ap "github.com/couchbase/indexing/secondary/adminport"
+	ap "github.com/ysui6888/indexing/secondary/adminport"
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
 )

@@ -29,6 +29,7 @@ import (
 	"time"
 	"errors"
 	c "github.com/couchbase/indexing/secondary/common"
+	"github.com/couchbase/indexing/secondary/transport"
 	"github.com/couchbase/indexing/secondary/dataport"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 )
@@ -55,7 +56,7 @@ type Endpoint struct {
 
 // NewEndpoint instanstiat a new Endpoint routine and return its reference.
 func NewEndpoint(feed *Feed, raddr string, n int, coord bool) (*Endpoint, error) {
-	flags := dataport.TransportFlag(0).SetProtobuf() // TODO: configurable
+	flags := transport.TransportFlag(0).SetProtobuf() // TODO: configurable
 	client, err := dataport.NewClient(raddr, n, flags)
 	if err != nil {
 		return nil, err
