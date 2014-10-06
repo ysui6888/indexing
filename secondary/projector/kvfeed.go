@@ -376,8 +376,6 @@ func(kvfeed *KVFeed) Start(settings map[string]interface{}) error {
 	}
 	c.Debugf("%v KVFeed Start - finish parsing settings\n", kvfeed.logPrefix)
 
-	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
-
 //	flogs, err := kvfeed.bucket.GetFailoverLogs(c.Vbno32to16(ts.Vbnos))
 //	if err != nil {
 //		return err

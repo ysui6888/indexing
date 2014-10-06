@@ -25,14 +25,13 @@
 package projector
 
 import (
-	"fmt"
-	"time"
 	"errors"
+	"fmt"
+	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
 	c "github.com/couchbase/indexing/secondary/common"
-	"github.com/couchbase/indexing/secondary/transport"
 	"github.com/couchbase/indexing/secondary/dataport"
 	"github.com/couchbase/indexing/secondary/transport"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	"time"
 )
 
 var ErrorInvalidDataForEndpoint = errors.New("secondary.invalidDataForEndpoint")
@@ -40,11 +39,11 @@ var ErrorInvalidDataForEndpoint = errors.New("secondary.invalidDataForEndpoint")
 // Endpoint structure to gather key-versions / mutations from one or more
 // vbuckets and push them downstream to a specific node.
 type Endpoint struct {
-	pp.AbstractPart  // Part
-	feed   *Feed
-	raddr  string           // immutable
-	client *dataport.Client // immutable
-	coord  bool             // whether this endpoint is coordinator
+	pp.AbstractPart // Part
+	feed            *Feed
+	raddr           string           // immutable
+	client          *dataport.Client // immutable
+	coord           bool             // whether this endpoint is coordinator
 	// gen-server
 	kvch  chan []interface{} // carries *c.KeyVersions
 	reqch chan []interface{} // carries control commands
@@ -74,7 +73,7 @@ func NewEndpoint(feed *Feed, raddr string, n int, coord bool) (*Endpoint, error)
 	}
 	endpoint.logPrefix = fmt.Sprintf("[%v]", endpoint.repr())
 	endpoint.stats = endpoint.newStats()
-	
+
 	// uses raddr as the part Id  for Endpoint
 	var isStarted_callback_func pp.IsStarted_Callback_Func = endpoint.IsStarted
 	endpoint.AbstractPart = pp.NewAbstractPart(raddr, &isStarted_callback_func)
@@ -95,18 +94,18 @@ func (endpoint *Endpoint) isCoord() bool {
 
 // data type that Endpoint accepts
 type EndpointData struct {
-	bucket string  
-	vbno   uint16 
+	bucket string
+	vbno   uint16
 	vbuuid uint64
-	kv *c.KeyVersions  
+	kv     *c.KeyVersions
 }
 
-func NewEndpointData(bucket string, vbno uint16, vbuuid uint64, kv *c.KeyVersions) (*EndpointData) {
+func NewEndpointData(bucket string, vbno uint16, vbuuid uint64, kv *c.KeyVersions) *EndpointData {
 	endpData := &EndpointData{
-		bucket : bucket,
-		vbno : vbno,
-		vbuuid : vbuuid,
-		kv : kv,
+		bucket: bucket,
+		vbno:   vbno,
+		vbuuid: vbuuid,
+		kv:     kv,
 	}
 	return endpData
 }
@@ -276,18 +275,18 @@ func (endpoint *Endpoint) doClose() {
 }
 
 // implements Part
-func(endpoint *Endpoint) Start(settings map[string]interface{}) error {
+func (endpoint *Endpoint) Start(settings map[string]interface{}) error {
 	go endpoint.run(endpoint.kvch, endpoint.reqch)
 	c.Infof("%v started for feed %v ...\n",
 		endpoint.logPrefix, endpoint.feed.Topic())
 	return nil
 }
 
-func(endpoint *Endpoint) Stop() error {
-	return  endpoint.CloseEndpoint()
+func (endpoint *Endpoint) Stop() error {
+	return endpoint.CloseEndpoint()
 }
 
-func (endpoint *Endpoint) Receive (data interface{}) error {
+func (endpoint *Endpoint) Receive(data interface{}) error {
 	// onlyEndpointData type data is accepted
 	endpointData, ok := data.(*EndpointData)
 	if !ok {
@@ -302,7 +301,7 @@ func (endpoint *Endpoint) IsStarted() bool {
 }
 
 // implements Nozzle
-func(endpoint *Endpoint) Open() error {
+func (endpoint *Endpoint) Open() error {
 	return nil
 }
 
@@ -310,6 +309,6 @@ func (endpoint *Endpoint) Close() error {
 	return nil
 }
 
-func(endpoint *Endpoint) IsOpen() bool {
+func (endpoint *Endpoint) IsOpen() bool {
 	return false
 }
