@@ -97,7 +97,7 @@ func (kv *kvUpr) StartVbStreams(
 		start, end := restartTs.Seqnos[i], uint64(0xFFFFFFFFFFFFFFFF)
 		snapStart, snapEnd := snapshots[i].GetStart(), snapshots[i].GetEnd()
 		err = kv.uprFeed.UprRequestStream(
-			vbno, flags, vbuuid, start, end, snapStart, snapEnd)
+			vbno, uint32(vbno), flags, vbuuid, start, end, snapStart, snapEnd)
 		if err != nil {
 			c.Errorf("%v %v", kv.kvfeed.logPrefix, err)
 			return nil, nil, err
