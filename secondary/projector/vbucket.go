@@ -17,6 +17,7 @@ package projector
 
 import (
 	"fmt"
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
 	"time"
@@ -182,7 +183,7 @@ loop:
 				m := msg[1].(*mc.UprEvent)
 				// broadcast StreamBegin
 				switch m.Opcode {
-				case mc.UprStreamRequest:
+				case gomemcached.UPR_STREAMREQ:
 					vr.sendToEndpoints(func(raddr string) *c.KeyVersions {
 						kv := c.NewKeyVersions(0, m.Key, 1)
 						kv.AddStreamBegin()
@@ -193,7 +194,7 @@ loop:
 					beginCount++
 					break inner // breaks out of select{}
 
-				case mc.UprSnapshot:
+				case gomemcached.UPR_SNAPSHOT:
 					c.Debugf("%v received snapshot %v %v (type %v)\n",
 						vr.logPrefix, m.SnapstartSeq, m.SnapendSeq, m.SnapshotType)
 					vr.sendToEndpoints(func(raddr string) *c.KeyVersions {

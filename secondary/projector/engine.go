@@ -5,6 +5,7 @@ package projector
 
 import (
 	"fmt"
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
 )
@@ -39,7 +40,7 @@ func (engine *Engine) AddToEndpoints(
 
 	vbno, seqno, docid := m.VBucket, m.Seqno, m.Key // Key is Docid
 	switch m.Opcode {
-	case mc.UprMutation:
+	case gomemcached.UPR_MUTATION:
 		pkey, nkey, okey, err := doEvaluate(m, uuid, evaluator)
 		if err != nil {
 			return err
@@ -56,7 +57,7 @@ func (engine *Engine) AddToEndpoints(
 			kvForEndpoints[raddr].AddUpsertDeletion(uuid, okey)
 		}
 
-	case mc.UprDeletion:
+	case gomemcached.UPR_DELETION:
 		pkey, _, okey, err := doEvaluate(m, uuid, evaluator)
 		if err != nil {
 			return err

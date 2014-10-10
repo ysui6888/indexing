@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
@@ -48,7 +49,7 @@ func (kvc *KVFeedConnector) scatterMutation(
 	vbno := m.VBucket
 
 	switch m.Opcode {
-	case mc.UprStreamRequest:
+	case gomemcached.UPR_STREAMREQ:
 		if _, ok := kvc.vbuckets[vbno]; ok {
 			fmtstr := "%v, duplicate OpStreamRequest for %v\n"
 			c.Errorf(fmtstr, kvc.logPrefix, m.VBucket)
@@ -71,7 +72,7 @@ func (kvc *KVFeedConnector) scatterMutation(
 			}
 		}
 
-	case mc.UprStreamEnd:
+	case gomemcached.UPR_STREAMEND:
 		if vr, ok := kvc.vbuckets[vbno]; !ok {
 			fmtstr := "%v, duplicate OpStreamEnd for %v\n"
 			c.Errorf(fmtstr, kvc.logPrefix, m.VBucket)
@@ -81,7 +82,7 @@ func (kvc *KVFeedConnector) scatterMutation(
 			c.Tracef("%v, StreamRequest for %v\n", kvc.logPrefix, vbno)
 		}
 
-	case mc.UprMutation, mc.UprDeletion, mc.UprSnapshot:
+	case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_SNAPSHOT:
 		if vr, ok := kvc.vbuckets[vbno]; ok {
 			if vr.vbuuid != m.VBuuid {
 				fmtstr := "%v, vbuuid mismatch (%v:%v) for vbucket %v\n"
