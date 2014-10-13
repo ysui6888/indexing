@@ -105,7 +105,7 @@ func NewBucketFeed(
 		
 		// register KVFeedStatisticsCollector as an event listener for KVFeed
 		kvfeedStatsCollector := new(KVFeedStatisticsCollector)
-		kvfeed.RegisterPartEventListener(pc.DataProcessed, kvfeedStatsCollector)
+		kvfeed.RegisterComponentEventListener(pc.DataProcessed, kvfeedStatsCollector)
 		bfeed.kvfeedStatsCollectors[kvaddr] = kvfeedStatsCollector
 		
 		bfeed.kvfeeds[kvaddr] = kvfeed

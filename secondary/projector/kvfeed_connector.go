@@ -10,12 +10,14 @@ import (
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	component "github.com/Xiaomei-Zhang/couchbase_goxdcr/component"
 )
 
 var ErrorInvalidDataForKVFeedConnector = errors.New("secondary.invalidDataForKVFeedConnector")
 var ErrorInvalidDownStreamNodeForKVFeedConnector = errors.New("secondary.invalidDownStreamNodeForKVFeedConnector")
 
 type KVFeedConnector struct {
+	component.AbstractComponent
 	vbuckets map[uint16]*VbucketRoutine // map of VbucketRoutine using vbno as key
 	bucketn string   // bucket name to be passed downstream to VbucketRoutines
 	endpoints map[string]*Endpoint   // endpoints to be passed downstream to VbucketRoutines
@@ -27,6 +29,7 @@ type KVFeedConnector struct {
 
 func NewKVFeedConnector(bucketn, kvfeedRepr string) (*KVFeedConnector, error) {
 	kvc := &KVFeedConnector{
+		AbstractComponent: component.NewAbstractComponent("KVFeedConnector"),
 	    vbuckets:  make(map[uint16]*VbucketRoutine),
 		bucketn : bucketn,
 		kvfeedRepr: kvfeedRepr,

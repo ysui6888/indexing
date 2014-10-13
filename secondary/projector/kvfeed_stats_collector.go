@@ -15,8 +15,8 @@ type KVFeedStatisticsCollector struct {
 }
 
 
-// implements pc.PartEventListener
-func (kvsc *KVFeedStatisticsCollector) OnEvent (eventType pc.PartEventType, item interface{}, part pc.Part, derivedItems []interface{}, otherInfos map[string]interface{}) {
+// implements pc.ComponentEventListener
+func (kvsc *KVFeedStatisticsCollector) OnEvent (eventType pc.ComponentEventType, item interface{}, component pc.Component, derivedItems []interface{}, otherInfos map[string]interface{}) {
 	kvsc.countLock.Lock()
 	defer kvsc.countLock.Unlock()
 	

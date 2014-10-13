@@ -7,12 +7,14 @@ import (
 	"errors"
 	c "github.com/couchbase/indexing/secondary/common"
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	component "github.com/Xiaomei-Zhang/couchbase_goxdcr/component"
 )
 
 var ErrorInvalidDataForVbucketRoutineConnector = errors.New("secondary.invalidDataForVbucketRoutineConnector")
 var ErrorInvalidDownStreamNodeForVbucketRoutineConnector = errors.New("secondary.invalidDownStreamNodeForVbucketRoutineConnector")
 
 type VbucketRoutineConnector struct {
+	component.AbstractComponent
 	endpoints map[string]*Endpoint // outgoing endpoints
 	logPrefix string
 }
@@ -28,6 +30,7 @@ type VbucketRoutineConnectorData struct {
 
 func NewVbucketRoutineConnector(endpoints map[string]*Endpoint, vrRepr string) (*VbucketRoutineConnector) {
 	vrc := &VbucketRoutineConnector{
+		AbstractComponent: component.NewAbstractComponent("VRConnector"),
 		endpoints : endpoints,
 		logPrefix : fmt.Sprintf("[%v]", vrRepr),
 	}
