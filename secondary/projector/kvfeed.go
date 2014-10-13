@@ -317,7 +317,6 @@ loop:
 		}
 	}
 
-	kvfeed.done.Done()
 }
 
 // construct start settings for KVFeed, which contains a single restart timestamp
