@@ -27,7 +27,7 @@ package projector
 import (
 	"errors"
 	"fmt"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	pp "github.com/Xiaomei-Zhang/goxdcr/parts"
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/dataport"
 	"github.com/couchbase/indexing/secondary/transport"

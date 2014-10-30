@@ -9,8 +9,8 @@ import (
 	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	c "github.com/couchbase/indexing/secondary/common"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	component "github.com/Xiaomei-Zhang/couchbase_goxdcr/component"
+	pc "github.com/Xiaomei-Zhang/goxdcr/common"
+	component "github.com/Xiaomei-Zhang/goxdcr/component"
 )
 
 var ErrorInvalidDataForKVFeedConnector = errors.New("secondary.invalidDataForKVFeedConnector")

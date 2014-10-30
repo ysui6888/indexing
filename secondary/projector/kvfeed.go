@@ -44,8 +44,8 @@ package projector
 import (
 	"errors"
 	"fmt"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	pc "github.com/Xiaomei-Zhang/goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/goxdcr/parts"
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/couchbaselabs/go-couchbase"

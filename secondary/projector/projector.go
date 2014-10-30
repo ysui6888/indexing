@@ -68,7 +68,7 @@ import (
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/couchbaselabs/go-couchbase"
-	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
+	pm "github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
 )
 
 // error codes

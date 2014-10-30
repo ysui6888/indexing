@@ -35,8 +35,8 @@ package projector
 import (
 	"fmt"
 	c "github.com/couchbase/indexing/secondary/common"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	pc "github.com/Xiaomei-Zhang/goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/goxdcr/parts"
 )
 
 // BucketFeed is per bucket, multiple kv-node feeds, for a subset of vbuckets.

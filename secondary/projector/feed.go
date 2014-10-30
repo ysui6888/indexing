@@ -9,7 +9,7 @@ import (
 
 	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbase/indexing/secondary/protobuf"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
+	pp "github.com/Xiaomei-Zhang/goxdcr/pipeline"
 )
 
 // error codes

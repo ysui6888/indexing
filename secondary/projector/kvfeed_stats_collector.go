@@ -4,7 +4,7 @@ package projector
 
 import (
     "sync"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	pc "github.com/Xiaomei-Zhang/goxdcr/common"
 	c "github.com/couchbase/indexing/secondary/common"
 )
 

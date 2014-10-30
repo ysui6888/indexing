@@ -22,7 +22,7 @@ import (
 	c "github.com/couchbase/indexing/secondary/common"
 	"time"
 	"errors"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	pp "github.com/Xiaomei-Zhang/goxdcr/parts"
 )
 
 var ErrorInvalidDataForVbucketRoutine = errors.New("secondary.invalidDataForVbucketRoutine")

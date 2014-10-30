@@ -5,9 +5,9 @@ package projector
 import (
 	"github.com/couchbase/indexing/secondary/protobuf"
 	c "github.com/couchbase/indexing/secondary/common"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
-	pctx "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_ctx"
+	pc "github.com/Xiaomei-Zhang/goxdcr/common"
+	pp "github.com/Xiaomei-Zhang/goxdcr/pipeline"
+	pctx "github.com/Xiaomei-Zhang/goxdcr/pipeline_ctx"
 )
 
 
